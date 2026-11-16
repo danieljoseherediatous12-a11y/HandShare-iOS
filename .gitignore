@@ -1,0 +1,22 @@
+# Xcode & DerivedData
+*.xcodeproj/
+!*.xcodeproj/xcshareddata/
+*.xcworkspace/
+!*.xcworkspace/xcshareddata/
+xcuserdata/
+DerivedData/
+build/
+dist/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local builder secrets / profiles
+*.p12
+*.mobileprovision
+ExportOptions.plist

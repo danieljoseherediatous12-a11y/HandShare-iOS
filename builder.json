@@ -1,0 +1,21 @@
+{
+  "project": "HandShare",
+  "platform": "ios",
+  "github": {
+    "owner": "danieljoseherediatous12-a11y",
+    "repo": "HandShare-iOS"
+  },
+  "provider": "github",
+  "codemagic": {},
+  "bitrise": {},
+  "ios": {
+    "path": ".",
+    "scheme": "HandShare"
+  },
+  "flutter": {
+    "watch": {}
+  },
+  "reactNative": {},
+  "kmp": {},
+  "mobai": {}
+}

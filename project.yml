@@ -1,0 +1,53 @@
+name: HandShare
+options:
+  bundleIdPrefix: com.handshare
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+
+targets:
+  HandShare:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: HandShare/Sources
+      - path: HandShare/Assets.xcassets
+    info:
+      path: HandShare/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.handshare.official.ios
+        PRODUCT_NAME: HandShare
+        INFOPLIST_FILE: HandShare/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: "NO"
+        SUPPORTS_MACCATALYST: "NO"
+        DEVELOPMENT_TEAM: ""
+    scheme:
+      testTargets:
+        - HandShareTests
+
+  HandShareTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: HandShareTests
+    dependencies:
+      - target: HandShare
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.handshare.official.ios.tests
+        GENERATE_INFOPLIST_FILE: "YES"
