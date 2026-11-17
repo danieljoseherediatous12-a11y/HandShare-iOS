@@ -1,7 +1,33 @@
+import AVFoundation
 import Combine
+import CoreTransferable
 import Foundation
 import Photos
+import PhotosUI
+import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
+
+private struct PickedMediaFile: Transferable, Sendable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .item) { received in
+            let tempDir = FileManager.default.temporaryDirectory
+            let ext = received.file.pathExtension
+            let name = "picker_\(UUID().uuidString)\(ext.isEmpty ? "" : ".\(ext)")"
+            let dest = tempDir.appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.copyItem(at: received.file, to: dest)
+            return Self(url: dest)
+        }
+    }
+}
+
+private enum PendingOutgoingPayload {
+    case asset(PHAsset)
+    case stagedFile(url: URL, metadata: HandShareFileMetadata)
+}
 
 @MainActor
 final class GrabSessionCoordinator: ObservableObject {
@@ -38,7 +64,7 @@ final class GrabSessionCoordinator: ObservableObject {
     private var activeViewerAsset: PHAsset?
     private var isViewerOpen = false
     private var sendQueueTask: Task<Void, Never>?
-    private var pendingOutgoingAssets: [PHAsset] = []
+    private var pendingOutgoingPayloads: [PendingOutgoingPayload] = []
     private var isSendingBatch = false
     private var streamCompletedDelivery = false
     private var dropConfirmedByReceiver = false
@@ -182,10 +208,104 @@ final class GrabSessionCoordinator: ObservableObject {
         }
     }
 
+    func handlePhotosPickerSelection(_ items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { return }
+        if status == .waitingToCatch || isInPostCatchCooldown() { return }
+
+        var fetchedById: [String: PHAsset] = [:]
+        let ids = items.compactMap { $0.itemIdentifier }
+        if !ids.isEmpty {
+            let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+            result.enumerateObjects { asset, _, _ in
+                fetchedById[asset.localIdentifier] = asset
+            }
+        }
+
+        var matchedAssets: [PHAsset] = []
+        var fallbackItems: [PhotosPickerItem] = []
+        for item in items {
+            if let id = item.itemIdentifier, let asset = fetchedById[id] {
+                matchedAssets.append(asset)
+            } else {
+                fallbackItems.append(item)
+            }
+        }
+
+        if matchedAssets.count == 1 && fallbackItems.isEmpty {
+            grabAsset(matchedAssets[0], fromViewer: false)
+        } else if !matchedAssets.isEmpty {
+            grabMultipleAssets(matchedAssets)
+        }
+
+        guard !fallbackItems.isEmpty else { return }
+        var stagedPayloads: [(URL, HandShareFileMetadata, UIImage?)] = []
+        for item in fallbackItems {
+            guard let staged = await stagePickerItemToTempFile(item) else { continue }
+            stagedPayloads.append(staged)
+        }
+        guard !stagedPayloads.isEmpty else { return }
+
+        isHoldingCard = true
+        isHeldCardDocked = false
+        status = .photoGrabbed
+        dropConfirmedByReceiver = false
+        streamCompletedDelivery = false
+        HapticEngine.shared.grabSuccess()
+        if let lastPreview = stagedPayloads.last(where: { $0.2 != nil })?.2, floatingPreviewImage == nil {
+            floatingPreviewImage = lastPreview
+        }
+        for (url, meta, _) in stagedPayloads {
+            pendingOutgoingPayloads.append(.stagedFile(url: url, metadata: meta))
+        }
+        if !isSendingBatch {
+            processSendQueue()
+        }
+    }
+
+    private func stagePickerItemToTempFile(_ item: PhotosPickerItem) async -> (URL, HandShareFileMetadata, UIImage?)? {
+        var fileURL: URL?
+        if let picked = try? await item.loadTransferable(type: PickedMediaFile.self) {
+            fileURL = picked.url
+        } else if let data = try? await item.loadTransferable(type: Data.self) {
+            let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "bin"
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("picker_\(UUID().uuidString).\(ext)")
+            if (try? data.write(to: url)) != nil {
+                fileURL = url
+            }
+        }
+        guard let url = fileURL else { return nil }
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let sizeBytes = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+        guard sizeBytes > 0 else {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+
+        let rawMime = item.supportedContentTypes.first?.preferredMIMEType ?? "application/octet-stream"
+        let rawMeta = HandShareFileMetadata(
+            fileName: url.lastPathComponent,
+            mimeType: rawMime,
+            sizeBytes: sizeBytes,
+            payloadId: 0
+        )
+        let meta = HandShareFileMetadata.corrected(forFileAt: url, metadata: rawMeta)
+        let preview = meta.isVideo ? generateVideoThumbnail(url: url) : UIImage(contentsOfFile: url.path)
+        return (url, meta, preview)
+    }
+
+    private func generateVideoThumbnail(url: URL) -> UIImage? {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 480, height: 480)
+        guard let cg = try? generator.copyCGImage(at: .zero, actualTime: nil) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+
     func cancelHeldGrab() {
         sendQueueTask?.cancel()
         sendQueueTask = nil
-        pendingOutgoingAssets.removeAll()
+        clearPendingPayloads()
         isSendingBatch = false
         grabbedAssets.removeAll()
         floatingPreviewImage = nil
@@ -286,7 +406,7 @@ final class GrabSessionCoordinator: ObservableObject {
                 self.selectedTargetEndpointId = peer.endpointId
                 self.selectedTargetName = peer.name
             }
-            if self.isHoldingCard && !self.pendingOutgoingAssets.isEmpty && !self.isSendingBatch {
+            if self.isHoldingCard && !self.pendingOutgoingPayloads.isEmpty && !self.isSendingBatch {
                 self.processSendQueue()
             }
         }
@@ -446,8 +566,17 @@ final class GrabSessionCoordinator: ObservableObject {
         grabAsset(asset, fromViewer: true)
     }
 
+    private func clearPendingPayloads() {
+        for payload in pendingOutgoingPayloads {
+            if case let .stagedFile(url, _) = payload {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        pendingOutgoingPayloads.removeAll()
+    }
+
     private func queueAndSendAsset(_ asset: PHAsset) {
-        pendingOutgoingAssets.append(asset)
+        pendingOutgoingPayloads.append(.asset(asset))
         if !isSendingBatch {
             processSendQueue()
         }
@@ -458,36 +587,50 @@ final class GrabSessionCoordinator: ObservableObject {
         isSendingBatch = true
         sendQueueTask = Task {
             defer { isSendingBatch = false }
-            while !Task.isCancelled && !pendingOutgoingAssets.isEmpty {
+            while !Task.isCancelled && !pendingOutgoingPayloads.isEmpty {
                 guard let peer = selectedPeer() else {
                     // Wait while held card floats until user connects a PC/Android or taps Cancelar
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     continue
                 }
-                let asset = pendingOutgoingAssets.removeFirst()
+                let payload = pendingOutgoingPayloads.removeFirst()
                 status = .teleporting
                 transferState = .preparing("Preparando archivo...")
-                guard let exported = await photos.exportAssetToTemporaryFile(asset) else {
-                    transferState = .failed("No se pudo exportar desde Fotos")
-                    continue
+
+                let tempURL: URL
+                let meta: HandShareFileMetadata
+                let assetId: String?
+
+                switch payload {
+                case let .asset(asset):
+                    guard let exported = await photos.exportAssetToTemporaryFile(asset) else {
+                        transferState = .failed("No se pudo exportar desde Fotos")
+                        continue
+                    }
+                    tempURL = exported.fileURL
+                    meta = HandShareFileMetadata(
+                        fileName: exported.fileName,
+                        mimeType: exported.mimeType,
+                        sizeBytes: exported.sizeBytes,
+                        payloadId: 0
+                    )
+                    assetId = asset.localIdentifier
+                case let .stagedFile(url, stagedMeta):
+                    tempURL = url
+                    meta = stagedMeta
+                    assetId = nil
                 }
-                defer { try? FileManager.default.removeItem(at: exported.fileURL) }
+                defer { try? FileManager.default.removeItem(at: tempURL) }
 
                 lan.sendControlMessage(endpointId: peer.endpointId, command: "PHOTO_ARMED_IN_HAND")
-                let meta = HandShareFileMetadata(
-                    fileName: exported.fileName,
-                    mimeType: exported.mimeType,
-                    sizeBytes: exported.sizeBytes,
-                    payloadId: 0
-                )
                 let ok = await lan.sendFileBlocking(
                     endpointId: peer.endpointId,
-                    fileURL: exported.fileURL,
+                    fileURL: tempURL,
                     metadata: meta
                 ) { [weak self] sent, total in
                     Task { @MainActor in
                         self?.transferState = .sending(
-                            fileName: exported.fileName,
+                            fileName: meta.fileName,
                             bytesTransferred: sent,
                             totalBytes: total
                         )
@@ -495,19 +638,19 @@ final class GrabSessionCoordinator: ObservableObject {
                 }
                 if ok {
                     history.recordTransfer(
-                        fileName: exported.fileName,
-                        mimeType: exported.mimeType,
-                        sizeBytes: exported.sizeBytes,
+                        fileName: meta.fileName,
+                        mimeType: meta.mimeType,
+                        sizeBytes: meta.sizeBytes,
                         remoteName: peer.name,
                         isSender: true,
                         success: true,
-                        localAssetIdentifier: asset.localIdentifier,
+                        localAssetIdentifier: assetId,
                         cachedRelativePath: nil
                     )
                     prefs.sentCount += 1
-                    transferState = .completed(fileName: exported.fileName, isSender: true)
+                    transferState = .completed(fileName: meta.fileName, isSender: true)
                 } else {
-                    transferState = .failed("Error enviando \(exported.fileName)")
+                    transferState = .failed("Error enviando \(meta.fileName)")
                 }
             }
             if isHoldingCard {
@@ -523,7 +666,7 @@ final class GrabSessionCoordinator: ObservableObject {
         isEdgeGlowVisible = false
         grabbedAssets.removeAll()
         floatingPreviewImage = nil
-        pendingOutgoingAssets.removeAll()
+        clearPendingPayloads()
         status = .completed
         setRadarActive(false)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in

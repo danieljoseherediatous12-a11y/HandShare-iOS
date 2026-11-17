@@ -38,13 +38,15 @@ struct EdgeGlowOverlayView: View {
     }
 }
 
+/// Liquid-glass Aurora sphere matching Android's `AirModeBubbleManager.AirBubbleView`.
 struct AirAuroraBubbleView: View {
     let isRadarActive: Bool
     let isHoldingCard: Bool
     let badgeCount: Int
     let onTap: () -> Void
 
-    @State private var spinAngle: Double = 0
+    @State private var auroraPhase: Double = 0
+    @State private var radarAngle: Double = 0
     @State private var dragOffsetY: CGFloat = 0
     @State private var committedOffsetY: CGFloat = 0
 
@@ -55,53 +57,147 @@ struct AirAuroraBubbleView: View {
                 Spacer()
                 Button(action: onTap) {
                     ZStack {
+                        // Outer soft Aurora ambient halo
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    colors: [
+                                        Color(red: 0.0, green: 0.95, blue: 1.0).opacity(isRadarActive ? 0.48 : 0.28),
+                                        Color(red: 0.46, green: 0.29, blue: 1.0).opacity(isRadarActive ? 0.26 : 0.14),
+                                        Color.clear
+                                    ],
+                                    center: .center,
+                                    startRadius: 12,
+                                    endRadius: 32
+                                )
+                            )
+                            .frame(width: 62, height: 62)
+
                         if isRadarActive {
                             Circle()
                                 .stroke(
                                     AngularGradient(
-                                        gradient: Gradient(colors: [
-                                            Color.cyan,
-                                            HSColor.blue,
-                                            HSColor.purple,
-                                            Color.cyan
-                                        ]),
+                                        colors: [
+                                            Color(red: 0.0, green: 0.95, blue: 1.0),
+                                            Color(red: 0.04, green: 0.52, blue: 1.0),
+                                            Color(red: 1.0, green: 0.18, blue: 0.52),
+                                            Color(red: 0.0, green: 0.96, blue: 0.63),
+                                            Color(red: 0.0, green: 0.95, blue: 1.0)
+                                        ],
                                         center: .center
                                     ),
-                                    lineWidth: 3.5
+                                    lineWidth: 2.8
                                 )
-                                .frame(width: 66, height: 66)
-                                .rotationEffect(.degrees(spinAngle))
+                                .frame(width: 52, height: 52)
+                                .rotationEffect(.degrees(radarAngle))
                         }
 
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: isRadarActive
-                                        ? [Color(red: 0.05, green: 0.45, blue: 1.0), Color(red: 0.22, green: 0.74, blue: 0.97)]
-                                        : [Color.black.opacity(0.78), Color(red: 0.12, green: 0.16, blue: 0.24).opacity(0.92)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
+                        // Obsidian crystal sphere + flowing aurora lobes inside
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    RadialGradient(
+                                        colors: [
+                                            Color(red: 0.063, green: 0.082, blue: 0.169),
+                                            Color(red: 0.020, green: 0.027, blue: 0.067)
+                                        ],
+                                        center: UnitPoint(x: 0.35, y: 0.3),
+                                        startRadius: 2,
+                                        endRadius: 28
+                                    )
                                 )
-                            )
-                            .frame(width: 58, height: 58)
-                            .overlay(
-                                Circle().stroke(Color.white.opacity(isRadarActive ? 0.85 : 0.35), lineWidth: 1.5)
-                            )
-                            .shadow(color: (isRadarActive ? Color.cyan : Color.black).opacity(0.35), radius: 12, x: 0, y: 6)
 
-                        Image(systemName: isRadarActive ? "hand.raised.fill" : "hand.raised")
-                            .font(.system(size: 23, weight: .semibold))
-                            .foregroundColor(.white)
+                            Circle()
+                                .fill(
+                                    RadialGradient(
+                                        colors: [
+                                            Color(red: 0.0, green: 0.95, blue: 1.0).opacity(0.9),
+                                            Color(red: 0.04, green: 0.52, blue: 1.0).opacity(0.45),
+                                            Color.clear
+                                        ],
+                                        center: .center,
+                                        startRadius: 0,
+                                        endRadius: 19
+                                    )
+                                )
+                                .offset(
+                                    x: cos(auroraPhase) * 6,
+                                    y: sin(auroraPhase * 1.3) * 6
+                                )
+                                .blendMode(.screen)
+
+                            Circle()
+                                .fill(
+                                    RadialGradient(
+                                        colors: [
+                                            Color(red: 1.0, green: 0.18, blue: 0.52).opacity(0.88),
+                                            Color(red: 0.72, green: 0.13, blue: 1.0).opacity(0.42),
+                                            Color.clear
+                                        ],
+                                        center: .center,
+                                        startRadius: 0,
+                                        endRadius: 18
+                                    )
+                                )
+                                .offset(
+                                    x: -sin(auroraPhase * 0.9) * 6.5,
+                                    y: cos(auroraPhase * 1.1) * 5.5
+                                )
+                                .blendMode(.screen)
+
+                            Circle()
+                                .fill(
+                                    RadialGradient(
+                                        colors: [
+                                            Color(red: 0.0, green: 0.96, blue: 0.63).opacity(0.85),
+                                            Color.clear
+                                        ],
+                                        center: .center,
+                                        startRadius: 0,
+                                        endRadius: 14
+                                    )
+                                )
+                                .offset(
+                                    x: cos(auroraPhase * 1.5 + 1.2) * 5,
+                                    y: sin(auroraPhase * 0.8 + 0.7) * 6
+                                )
+                                .blendMode(.screen)
+
+                            // Specular highlight top-left
+                            Circle()
+                                .fill(Color.white.opacity(0.32))
+                                .frame(width: 14, height: 8)
+                                .blur(radius: 2)
+                                .offset(x: -7, y: -11)
+
+                            Image(systemName: isRadarActive ? "hand.raised.fill" : "hand.raised")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.white.opacity(isRadarActive ? 1.0 : 0.92))
+                        }
+                        .frame(width: 44, height: 44)
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [Color.white.opacity(0.75), Color.cyan.opacity(0.45), Color.purple.opacity(0.5)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1.5
+                                )
+                        )
+                        .shadow(color: Color.cyan.opacity(isRadarActive ? 0.55 : 0.25), radius: 10, x: 0, y: 4)
 
                         if badgeCount > 0 {
                             Text("×\(badgeCount)")
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(size: 10.5, weight: .bold))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(HSColor.blue, in: Capsule())
-                                .overlay(Capsule().stroke(Color.white, lineWidth: 1.2))
-                                .offset(x: 22, y: -22)
+                                .background(Color(red: 0.04, green: 0.52, blue: 1.0), in: Capsule())
+                                .overlay(Capsule().stroke(Color(red: 0.04, green: 0.05, blue: 0.09), lineWidth: 1.5))
+                                .offset(x: 18, y: -18)
                         }
                     }
                 }
@@ -109,21 +205,22 @@ struct AirAuroraBubbleView: View {
                 .offset(y: committedOffsetY + dragOffsetY)
                 .gesture(
                     DragGesture()
-                        .onChanged { val in
-                            dragOffsetY = val.translation.height
-                        }
+                        .onChanged { val in dragOffsetY = val.translation.height }
                         .onEnded { val in
                             committedOffsetY = max(-280, min(60, committedOffsetY + val.translation.height))
                             dragOffsetY = 0
                         }
                 )
-                .padding(.trailing, 14)
-                .padding(.bottom, 100)
+                .padding(.trailing, 8)
+                .padding(.bottom, 95)
             }
         }
         .onAppear {
-            withAnimation(.linear(duration: 2.2).repeatForever(autoreverses: false)) {
-                spinAngle = 360
+            withAnimation(.linear(duration: 4.5).repeatForever(autoreverses: false)) {
+                auroraPhase = .pi * 2
+            }
+            withAnimation(.linear(duration: 1.8).repeatForever(autoreverses: false)) {
+                radarAngle = 360
             }
         }
     }
@@ -168,10 +265,10 @@ struct FloatingHeldCardView: View {
                 VStack {
                     HStack {
                         Spacer()
-                        cardBody(width: 78, height: 102, corner: 14)
+                        cardBody(width: 74, height: 96, corner: 14)
                             .onTapGesture(perform: onTapCard)
-                            .padding(.trailing, 14)
-                            .padding(.top, 96)
+                            .padding(.trailing, 12)
+                            .padding(.top, 110)
                     }
                     Spacer()
                 }
@@ -184,19 +281,15 @@ struct FloatingHeldCardView: View {
                         .offset(y: floatUp ? -7 : 5)
                     Spacer()
 
-                    HStack(spacing: 12) {
-                        Button(action: onCancel) {
-                            Text("Cancelar")
-                                .font(.system(size: 14.5, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 22)
-                                .padding(.vertical, 10)
-                                .background(Color(red: 0.14, green: 0.14, blue: 0.16).opacity(0.86), in: Capsule())
-                                .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
+                    Button(action: onCancel) {
+                        Text("Cancelar")
+                            .font(.system(size: 14.5, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 120, height: 40)
+                            .background(Color(red: 0.14, green: 0.14, blue: 0.15).opacity(0.75), in: Capsule())
                     }
-                    .padding(.bottom, 42)
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 48)
                 }
             }
         }
@@ -215,14 +308,16 @@ struct FloatingHeldCardView: View {
         ZStack(alignment: .topTrailing) {
             if stackCount > 1 {
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .fill(HSColor.indigo.opacity(0.65))
+                    .fill(Color(red: 0.12, green: 0.23, blue: 0.54).opacity(0.78))
+                    .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous).stroke(Color.cyan.opacity(0.65), lineWidth: 1.5))
                     .frame(width: width * 0.94, height: height * 0.94)
                     .rotationEffect(.degrees(5.5))
                     .offset(x: 9, y: 6)
             }
             if stackCount > 2 {
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .fill(HSColor.blue.opacity(0.48))
+                    .fill(Color(red: 0.12, green: 0.23, blue: 0.54).opacity(0.65))
+                    .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous).stroke(Color.cyan.opacity(0.5), lineWidth: 1.5))
                     .frame(width: width * 0.90, height: height * 0.90)
                     .rotationEffect(.degrees(-5.0))
                     .offset(x: -9, y: 7)
@@ -234,38 +329,28 @@ struct FloatingHeldCardView: View {
                         .resizable()
                         .scaledToFill()
                         .frame(width: width, height: height)
-                        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
                 } else {
-                    RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color(white: 0.18), Color(white: 0.08)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: width, height: height)
-                        .overlay(ProgressView().tint(.white))
+                    LinearGradient(
+                        colors: [Color(red: 0.15, green: 0.16, blue: 0.18), Color(red: 0.06, green: 0.07, blue: 0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .frame(width: width, height: height)
                 }
 
-                if !isDocked {
-                    VStack(spacing: 4) {
-                        Text(statusLabel)
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        if case .sending = transferState {
-                            ProgressView(value: transferState.progressFraction)
-                                .tint(Color.cyan)
-                                .padding(.horizontal, 12)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                    .frame(width: width)
-                    .background(Color.black.opacity(0.55))
-                    .clipShape(
-                        RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    )
+                // Subtle top glass sheen
+                LinearGradient(
+                    colors: [Color.white.opacity(0.15), Color.clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+                .frame(width: width, height: height)
+
+                if !isDocked, case .sending = transferState {
+                    ProgressView(value: transferState.progressFraction)
+                        .tint(Color.cyan)
+                        .padding(12)
+                        .background(Color.black.opacity(0.45))
                 }
             }
             .frame(width: width, height: height)
@@ -278,41 +363,28 @@ struct FloatingHeldCardView: View {
                             center: .center,
                             angle: .degrees(sweepAngle)
                         ),
-                        lineWidth: isDocked ? 2.2 : 3.0
+                        lineWidth: isDocked ? 2.2 : 2.8
                     )
             )
             .shadow(color: Color.cyan.opacity(0.35), radius: isDocked ? 10 : 22, x: 0, y: 8)
 
             if stackCount > 1 {
                 Text("×\(stackCount)")
-                    .font(.system(size: isDocked ? 11 : 14, weight: .bold))
+                    .font(.system(size: isDocked ? 11 : 15, weight: .bold))
                     .foregroundColor(.white)
-                    .padding(.horizontal, isDocked ? 7 : 10)
-                    .padding(.vertical, isDocked ? 3 : 5)
+                    .padding(.horizontal, isDocked ? 7 : 9)
+                    .padding(.vertical, isDocked ? 3 : 4)
                     .background(
                         LinearGradient(
-                            colors: [HSColor.blue, Color.cyan],
+                            colors: [Color(red: 0.04, green: 0.52, blue: 1.0), Color(red: 0.22, green: 0.74, blue: 0.97)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
                         in: Capsule()
                     )
-                    .overlay(Capsule().stroke(Color.white, lineWidth: 1.5))
+                    .overlay(Capsule().stroke(Color.white, lineWidth: 1.8))
                     .offset(x: 6, y: -6)
             }
-        }
-    }
-
-    private var statusLabel: String {
-        switch transferState {
-        case let .sending(fileName, _, _):
-            return "Enviando \(fileName)"
-        case .completed:
-            return targetName != nil ? "Listo en \(targetName!)" : "Esperando palma en receptor"
-        case let .failed(msg):
-            return msg
-        default:
-            return targetName != nil ? "Conectado a \(targetName!)" : "Buscando receptor Wi-Fi..."
         }
     }
 }

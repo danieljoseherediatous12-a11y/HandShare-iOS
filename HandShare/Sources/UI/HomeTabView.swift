@@ -9,12 +9,14 @@ struct HomeTabView: View {
     @ObservedObject private var history = TransferHistoryStore.shared
     @ObservedObject private var prefs = AppPreferences.shared
     @ObservedObject private var detector: CameraHandDetector
+
     @Binding var activeTab: HSTab
     let onOpenViewer: (PHAsset) -> Void
     let onOpenManualConnect: () -> Void
     let onOpenGuide: (Bool) -> Void
 
     @State private var historyDirectionTab = 0 // 0 = Recibidos, 1 = Enviados
+    @State private var pickerItems: [PhotosPickerItem] = []
 
     init(
         coordinator: GrabSessionCoordinator,
@@ -43,41 +45,23 @@ struct HomeTabView: View {
         historyDirectionTab == 0 ? receivedHistory : sentHistory
     }
 
+    private var isReady: Bool {
+        lan.isWifiAvailable && photos.isAuthorized
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header
-                HStack(spacing: 12) {
-                    HandShareHeaderLogo(size: 38)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("HandShare")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundColor(HSColor.label)
-                        Text(subtitleText)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundColor(HSColor.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                    Button {
+            VStack(alignment: .leading, spacing: 0) {
+                LargeTitleBar(title: "HandShare") {
+                    CircleIconButton(icon: "gearshape.fill") {
                         withAnimation { activeTab = .settings }
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(HSColor.label)
-                            .frame(width: 38, height: 38)
-                            .background(HSColor.card, in: Circle())
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
 
-                // Hero Card
+                // Continuity Hero Card (Exact Android/iOS Twin)
                 ContinuityHeroCardView(
-                    isReady: lan.isWifiAvailable && photos.isAuthorized,
-                    peerCount: lan.peers.count,
-                    isHolding: coordinator.isHoldingCard,
-                    statusText: heroStatusText
+                    isReady: isReady,
+                    nearbyCount: lan.peers.count
                 ) {
                     if !photos.isAuthorized {
                         Task { _ = await photos.requestAuthorization() }
@@ -87,9 +71,11 @@ struct HomeTabView: View {
                 }
                 .padding(.horizontal, 16)
 
+                Spacer().frame(height: 14)
+
                 // Control Center toggles
-                HStack(spacing: 8) {
-                    controlPill(
+                HStack(spacing: 0) {
+                    controlToggle(
                         icon: lan.isWifiAvailable ? "wifi" : "wifi.slash",
                         label: "Wi‑Fi",
                         active: lan.isWifiAvailable,
@@ -97,16 +83,14 @@ struct HomeTabView: View {
                     ) {
                         lan.refreshDiscovery()
                     }
-
-                    controlPill(
+                    controlToggle(
                         icon: "bonjour",
                         label: "Red local",
                         active: true,
                         color: HSColor.indigo,
                         action: onOpenManualConnect
                     )
-
-                    controlPill(
+                    controlToggle(
                         icon: detector.cameraPermissionGranted ? "camera.fill" : "camera",
                         label: "Cámara",
                         active: detector.cameraPermissionGranted,
@@ -114,273 +98,234 @@ struct HomeTabView: View {
                     ) {
                         Task { await detector.requestPermissionAndStart() }
                     }
-
-                    controlPill(
+                    controlToggle(
                         icon: "photo.fill",
-                        label: "Fotos",
+                        label: "Gestos",
                         active: photos.isAuthorized,
-                        color: HSColor.teal
+                        color: HSColor.green
                     ) {
                         Task { _ = await photos.requestAuthorization() }
                     }
                 }
-                .padding(.vertical, 14)
-                .padding(.horizontal, 8)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity)
                 .background(HSColor.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .padding(.horizontal, 16)
 
-                // Gesture guide cards
-                HStack(spacing: 12) {
-                    quickActionTile(
+                // Enviar / Recibir Gesture Tiles
+                HStack(spacing: 14) {
+                    gestureTile(
                         title: "Enviar",
-                        subtitle: "Palma ✋ → Puño ✊",
                         icon: "square.and.arrow.up",
-                        colors: [Color(red: 0.04, green: 0.52, blue: 1.0), Color(red: 0.37, green: 0.36, blue: 0.90)]
+                        gradient: [Color(red: 0.039, green: 0.518, blue: 1.0), Color(red: 0.369, green: 0.361, blue: 0.902)]
                     ) { onOpenGuide(true) }
 
-                    quickActionTile(
+                    gestureTile(
                         title: "Recibir",
-                        subtitle: "Abre palma ✋ para soltar",
                         icon: "square.and.arrow.down",
-                        colors: [Color(red: 0.75, green: 0.35, blue: 0.95), Color(red: 1.0, green: 0.22, blue: 0.37)]
+                        gradient: [Color(red: 0.749, green: 0.353, blue: 0.949), Color(red: 1.0, green: 0.216, blue: 0.373)]
                     ) { onOpenGuide(false) }
                 }
                 .padding(.horizontal, 16)
+                .padding(.top, 14)
 
-                // Nearby devices
-                VStack(alignment: .leading, spacing: 10) {
-                    sectionHeader("Cercanos") {
-                        withAnimation { activeTab = .devices }
-                    }
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            if lan.peers.isEmpty {
-                                VStack(spacing: 6) {
-                                    Circle()
-                                        .fill(HSColor.fill)
-                                        .frame(width: 58, height: 58)
-                                        .overlay(ProgressView().tint(HSColor.blue))
-                                    Text("Buscando...")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(HSColor.secondary)
-                                }
-                            } else {
-                                ForEach(Array(lan.peers.enumerated()), id: \.element.endpointId) { idx, peer in
-                                    let isSelected = coordinator.selectedTargetEndpointId == peer.endpointId
-                                    let grad = HSColor.avatarGradients[idx % HSColor.avatarGradients.count]
-                                    Button {
-                                        coordinator.selectPeer(peer)
-                                        HapticEngine.shared.subtleTap()
-                                    } label: {
-                                        VStack(spacing: 6) {
-                                            ZStack(alignment: .bottomTrailing) {
-                                                Circle()
-                                                    .fill(LinearGradient(colors: grad, startPoint: .topLeading, endPoint: .bottomTrailing))
-                                                    .frame(width: 58, height: 58)
-                                                    .overlay(
-                                                        Image(systemName: peer.isDesktop ? "desktopcomputer" : "iphone")
-                                                            .font(.system(size: 22, weight: .semibold))
-                                                            .foregroundColor(.white)
-                                                    )
-                                                    .overlay(
-                                                        Circle().stroke(isSelected ? HSColor.blue : Color.clear, lineWidth: 3)
-                                                            .padding(-4)
-                                                    )
-                                                if peer.isConnected {
-                                                    Circle()
-                                                        .fill(HSColor.green)
-                                                        .frame(width: 14, height: 14)
-                                                        .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                                                }
-                                            }
-                                            Text(peer.name)
-                                                .font(.system(size: 12, weight: isSelected ? .bold : .medium))
-                                                .foregroundColor(HSColor.label)
-                                                .lineLimit(1)
-                                                .frame(maxWidth: 74)
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-
-                            Button {
-                                coordinator.lan.refreshDiscovery()
-                            } label: {
-                                VStack(spacing: 6) {
-                                    Circle()
-                                        .fill(HSColor.card)
-                                        .frame(width: 58, height: 58)
-                                        .overlay(
-                                            Image(systemName: "arrow.clockwise")
-                                                .font(.system(size: 20, weight: .semibold))
-                                                .foregroundColor(HSColor.blue)
-                                        )
-                                    Text("Actualizar")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(HSColor.secondary)
-                                }
-                            }
-                            .buttonStyle(.plain)
-
-                            Button(action: onOpenManualConnect) {
-                                VStack(spacing: 6) {
-                                    Circle()
-                                        .fill(HSColor.card)
-                                        .frame(width: 58, height: 58)
-                                        .overlay(
-                                            Image(systemName: "link.badge.plus")
-                                                .font(.system(size: 20, weight: .semibold))
-                                                .foregroundColor(HSColor.indigo)
-                                        )
-                                    Text("Por IP")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(HSColor.secondary)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 16)
-                    }
+                // Cercanos (AirDrop style)
+                SectionHeaderBar(title: "Cercanos") {
+                    withAnimation { activeTab = .devices }
                 }
-
-                // Recent Gallery Strip
-                if !photos.recentAssets.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        sectionHeader("Recientes en iPhone") {
-                            withAnimation { activeTab = .gallery }
-                        }
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(photos.recentAssets.prefix(12), id: \.localIdentifier) { asset in
-                                    Button {
-                                        onOpenViewer(asset)
-                                    } label: {
-                                        PHAssetThumbnailView(asset: asset, size: CGSize(width: 180, height: 220))
-                                            .frame(width: 112, height: 148)
-                                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                    }
-                                    .buttonStyle(.plain)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 18) {
+                        if lan.peers.isEmpty {
+                            ScanningAvatarView()
+                            RefreshAvatarView { lan.refreshDiscovery() }
+                            ManualIpAvatarView(onTap: onOpenManualConnect)
+                        } else {
+                            ForEach(Array(lan.peers.enumerated()), id: \.element.endpointId) { idx, peer in
+                                let isSelected = coordinator.selectedTargetEndpointId == peer.endpointId
+                                DeviceAvatarView(
+                                    peer: peer,
+                                    gradientIndex: idx,
+                                    isSelected: isSelected
+                                ) {
+                                    coordinator.selectPeer(peer)
+                                    HapticEngine.shared.subtleTap()
                                 }
                             }
-                            .padding(.horizontal, 16)
+                            RefreshAvatarView { lan.refreshDiscovery() }
+                            ManualIpAvatarView(onTap: onOpenManualConnect)
                         }
                     }
+                    .padding(.horizontal, 16)
                 }
 
                 // Enviados y Recibidos
-                VStack(alignment: .leading, spacing: 10) {
-                    sectionHeader("Enviados y Recibidos") {
-                        withAnimation { activeTab = .gallery }
-                    }
-                    Picker("Historial", selection: $historyDirectionTab) {
-                        Text("Recibidos (\(receivedHistory.count))").tag(0)
-                        Text("Enviados (\(sentHistory.count))").tag(1)
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 16)
+                SectionHeaderBar(title: "Enviados y Recibidos") {
+                    withAnimation { activeTab = .gallery }
+                }
+                IosSegmentedControlBar(
+                    options: [
+                        "Recibidos (\(receivedHistory.count))",
+                        "Enviados (\(sentHistory.count))"
+                    ],
+                    selected: $historyDirectionTab
+                )
+                .padding(.horizontal, 16)
 
-                    if activeHistory.isEmpty {
-                        HStack(spacing: 12) {
-                            ZStack {
-                                Circle()
-                                    .fill((historyDirectionTab == 0 ? HSColor.green : HSColor.blue).opacity(0.15))
-                                    .frame(width: 42, height: 42)
+                Spacer().frame(height: 10)
+
+                if activeHistory.isEmpty {
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill((historyDirectionTab == 0 ? HSColor.green : HSColor.blue).opacity(0.14))
+                            .frame(width: 40, height: 40)
+                            .overlay(
                                 Image(systemName: historyDirectionTab == 0 ? "square.and.arrow.down" : "square.and.arrow.up")
+                                    .font(.system(size: 17, weight: .semibold))
                                     .foregroundColor(historyDirectionTab == 0 ? HSColor.green : HSColor.blue)
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(historyDirectionTab == 0 ? "Sin archivos recibidos aún" : "Sin archivos enviados aún")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundColor(HSColor.label)
-                                Text(historyDirectionTab == 0
-                                     ? "Las fotos y videos que atrapes con ✋ aparecerán aquí"
-                                     : "Las fotos y videos que envíes con ✋→✊ aparecerán aquí")
-                                    .font(.system(size: 12.5))
-                                    .foregroundColor(HSColor.secondary)
-                            }
-                            Spacer()
+                            )
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(historyDirectionTab == 0 ? "Sin archivos recibidos aún" : "Sin archivos enviados aún")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(HSColor.label)
+                            Text(historyDirectionTab == 0
+                                 ? "Las fotos y videos que atrapes con ✋ aparecerán aquí"
+                                 : "Las fotos y videos que envíes con ✋→✊ aparecerán aquí")
+                                .font(.system(size: 13))
+                                .foregroundColor(HSColor.secondary)
                         }
-                        .padding(18)
-                        .background(HSColor.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 22)
+                    .background(HSColor.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, 16)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(activeHistory.prefix(25)) { record in
+                                historyCard(record)
+                            }
+                        }
                         .padding(.horizontal, 16)
-                    } else {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(activeHistory.prefix(20)) { record in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        if let id = record.localAssetIdentifier,
-                                           let asset = coordinator.photos.asset(forIdentifier: id) {
-                                            PHAssetThumbnailView(asset: asset, size: CGSize(width: 180, height: 180))
-                                                .frame(width: 120, height: 120)
-                                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                        } else {
-                                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                                .fill(HSColor.fill)
-                                                .frame(width: 120, height: 120)
-                                                .overlay(
-                                                    Image(systemName: record.isVideo ? "video.fill" : "photo.fill")
-                                                        .font(.system(size: 28))
-                                                        .foregroundColor(HSColor.blue)
-                                                )
-                                        }
-                                        Text(record.fileName)
-                                            .font(.system(size: 11.5, weight: .semibold))
-                                            .foregroundColor(HSColor.label)
-                                            .lineLimit(1)
-                                        Text(record.remoteName)
-                                            .font(.system(size: 10.5))
-                                            .foregroundColor(HSColor.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    .frame(width: 120)
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                        }
                     }
                 }
+
+                // Recientes
+                SectionHeaderBar(title: "Recientes") {
+                    withAnimation { activeTab = .gallery }
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(photos.recentAssets.prefix(16), id: \.localIdentifier) { asset in
+                            Button {
+                                onOpenViewer(asset)
+                            } label: {
+                                PHAssetThumbnailView(asset: asset, size: CGSize(width: 240, height: 300))
+                                    .frame(width: 116, height: 150)
+                                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        PhotosPicker(
+                            selection: $pickerItems,
+                            maxSelectionCount: 20,
+                            matching: .any(of: [.images, .videos]),
+                            photoLibrary: .shared()
+                        ) {
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(HSColor.card)
+                                .frame(width: 116, height: 150)
+                                .overlay(
+                                    Circle()
+                                        .fill(HSColor.blue.opacity(0.12))
+                                        .frame(width: 44, height: 44)
+                                        .overlay(
+                                            Image(systemName: "plus")
+                                                .font(.system(size: 20, weight: .semibold))
+                                                .foregroundColor(HSColor.blue)
+                                        )
+                                )
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
             }
-            .padding(.bottom, 110)
+            .padding(.bottom, 120)
         }
         .background(HSColor.background)
-    }
-
-    private var subtitleText: String {
-        let ip = lan.localIPAddress ?? "Sin IP Wi‑Fi"
-        return "\(prefs.deviceName) · \(ip)"
-    }
-
-    private var heroStatusText: String {
-        if coordinator.isHoldingCard {
-            return "Sosteniendo \(coordinator.grabbedAssets.count) elemento(s)"
-        }
-        if coordinator.status == .waitingToCatch {
-            return "Archivo entrante listo — abre la palma ✋"
-        }
-        if lan.peers.isEmpty {
-            return "Buscando Android o Windows PC en puertos 47831/47832"
-        }
-        return "\(lan.peers.count) dispositivo(s) cercano(s) listo(s)"
-    }
-
-    private func sectionHeader(_ title: String, action: @escaping () -> Void) -> some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 19, weight: .bold))
-                .foregroundColor(HSColor.label)
-            Spacer()
-            Button(action: action) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(HSColor.secondary)
+        .onChange(of: pickerItems) { newItems in
+            guard !newItems.isEmpty else { return }
+            Task {
+                await coordinator.handlePhotosPickerSelection(newItems)
+                pickerItems = []
             }
         }
-        .padding(.horizontal, 16)
     }
 
-    private func controlPill(
+    private func historyCard(_ record: TransferHistoryRecord) -> some View {
+        let asset = record.localAssetIdentifier.flatMap { photos.asset(forIdentifier: $0) }
+        return Button {
+            if let asset {
+                onOpenViewer(asset)
+            }
+        } label: {
+            ZStack(alignment: .bottomLeading) {
+                if let asset {
+                    PHAssetThumbnailView(asset: asset, size: CGSize(width: 260, height: 340))
+                        .frame(width: 126, height: 164)
+                } else {
+                    Rectangle()
+                        .fill(HSColor.fill)
+                        .frame(width: 126, height: 164)
+                        .overlay(
+                            Image(systemName: record.isVideo ? "video.fill" : "photo.fill")
+                                .font(.system(size: 30))
+                                .foregroundColor(HSColor.blue)
+                        )
+                }
+
+                VStack {
+                    HStack {
+                        Spacer()
+                        Circle()
+                            .fill((record.isSender ? HSColor.blue : HSColor.green).opacity(0.9))
+                            .frame(width: 26, height: 26)
+                            .overlay(
+                                Image(systemName: record.isSender ? "arrow.up.right" : "arrow.down.left")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.white)
+                            )
+                            .padding(7)
+                    }
+                    Spacer()
+                    LinearGradient(
+                        colors: [.clear, Color.black.opacity(0.78)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 38)
+                    .overlay(
+                        HStack {
+                            Text(record.isSender ? "A \(record.remoteName)" : "De \(record.remoteName)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 9),
+                        alignment: .bottomLeading
+                    )
+                }
+            }
+            .frame(width: 126, height: 164)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(HSColor.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func controlToggle(
         icon: String,
         label: String,
         active: Bool,
@@ -388,53 +333,57 @@ struct HomeTabView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 6) {
+            VStack(spacing: 7) {
                 Circle()
                     .fill(active ? color : HSColor.fill)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 54, height: 54)
                     .overlay(
                         Image(systemName: icon)
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 22, weight: .semibold))
                             .foregroundColor(active ? .white : HSColor.secondary)
                     )
                 Text(label)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundColor(HSColor.label)
-                    .lineLimit(1)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(active ? HSColor.label : HSColor.secondary)
             }
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
     }
 
-    private func quickActionTile(
+    private func gestureTile(
         title: String,
-        subtitle: String,
         icon: String,
-        colors: [Color],
+        gradient: [Color],
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 36, height: 36)
-                    .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
-                                in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
+            ZStack(alignment: .topLeading) {
+                VStack(alignment: .leading) {
+                    HStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 46, height: 46)
+                            .overlay(
+                                Image(systemName: icon)
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(.white)
+                            )
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(HSColor.tertiary)
+                    }
+                    Spacer()
                     Text(title)
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(HSColor.label)
-                    Text(subtitle)
-                        .font(.system(size: 11.5))
-                        .foregroundColor(HSColor.secondary)
-                        .lineLimit(1)
                 }
+                .padding(16)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(HSColor.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .frame(maxWidth: .infinity)
+            .frame(height: 118)
+            .background(HSColor.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -442,69 +391,273 @@ struct HomeTabView: View {
 
 private struct ContinuityHeroCardView: View {
     let isReady: Bool
-    let peerCount: Int
-    let isHolding: Bool
-    let statusText: String
+    let nearbyCount: Int
+    let action: () -> Void
+
+    @State private var ringPhase: Double = 0
+    @State private var breathe: CGFloat = 0.94
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.039, green: 0.518, blue: 1.0),
+                        Color(red: 0.247, green: 0.357, blue: 1.0),
+                        Color(red: 0.369, green: 0.361, blue: 0.902)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                // Soft light blobs matching Android Hero
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Color.white.opacity(0.22), .clear],
+                            center: .center,
+                            startRadius: 2,
+                            endRadius: 130
+                        )
+                    )
+                    .frame(width: 260, height: 260)
+                    .offset(x: -110, y: -75)
+
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Color(red: 0.392, green: 0.824, blue: 1.0).opacity(0.30), .clear],
+                            center: .center,
+                            startRadius: 2,
+                            endRadius: 120
+                        )
+                    )
+                    .frame(width: 240, height: 240)
+                    .offset(x: 115, y: 80)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Continuidad")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.white.opacity(0.78))
+                        Text(isReady ? "Listo" : "Activar")
+                            .font(.system(size: 40, weight: .bold))
+                            .foregroundColor(.white)
+                            .tracking(-1)
+                        Spacer().frame(height: 10)
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(isReady ? Color(red: 0.188, green: 0.820, blue: 0.345) : Color(red: 1.0, green: 0.839, blue: 0.039))
+                                .frame(width: 7, height: 7)
+                            Image(systemName: "dot.radiowaves.left.and.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white)
+                            Text("\(nearbyCount)")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.20), in: Capsule())
+                    }
+                    .padding(.leading, 22)
+
+                    Spacer()
+
+                    ZStack {
+                        ForEach(0..<3, id: \.self) { i in
+                            let p = (ringPhase + Double(i) / 3.0).truncatingRemainder(dividingBy: 1.0)
+                            Circle()
+                                .stroke(Color.white.opacity((1.0 - p) * 0.45), lineWidth: 1.6)
+                                .frame(width: CGFloat(150 * (0.38 + 0.62 * p)), height: CGFloat(150 * (0.38 + 0.62 * p)))
+                        }
+
+                        Circle()
+                            .fill(Color.white.opacity(0.9))
+                            .frame(width: 6, height: 6)
+                            .offset(
+                                x: cos(ringPhase * .pi * 2) * 54,
+                                y: sin(ringPhase * .pi * 2) * 54
+                            )
+
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 62, height: 62)
+                            .scaleEffect(breathe)
+                            .shadow(color: Color.black.opacity(0.25), radius: 10, x: 0, y: 4)
+                            .overlay(
+                                Image(systemName: "hand.raised.fill")
+                                    .font(.system(size: 26, weight: .bold))
+                                    .foregroundColor(Color(red: 0.247, green: 0.357, blue: 1.0))
+                            )
+                    }
+                    .frame(width: 150, height: 150)
+                    .padding(.trailing, 14)
+                }
+            }
+            .frame(height: 196)
+            .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+            .shadow(color: Color(red: 0.227, green: 0.357, blue: 1.0).opacity(0.32), radius: 18, x: 0, y: 8)
+        }
+        .buttonStyle(.plain)
+        .onAppear {
+            withAnimation(.linear(duration: 2.6).repeatForever(autoreverses: false)) {
+                ringPhase = 1.0
+            }
+            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                breathe = 1.04
+            }
+        }
+    }
+}
+
+private struct DeviceAvatarView: View {
+    let peer: HandSharePeer
+    let gradientIndex: Int
+    let isSelected: Bool
+    let onClick: () -> Void
+
+    var body: some View {
+        let grad = HSColor.avatarGradients[gradientIndex % HSColor.avatarGradients.count]
+        let initials = peer.name
+            .split(whereSeparator: { $0 == " " || $0 == "-" || $0 == "_" })
+            .prefix(2)
+            .compactMap { $0.first?.uppercased() }
+            .joined()
+        let badgeColor = peer.isConnected ? HSColor.green : HSColor.blue
+
+        Button(action: onClick) {
+            VStack(spacing: 8) {
+                ZStack(alignment: .bottomTrailing) {
+                    Circle()
+                        .fill(LinearGradient(colors: grad, startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 66, height: 66)
+                        .overlay(
+                            Group {
+                                if peer.isDesktop {
+                                    Image(systemName: "desktopcomputer")
+                                        .font(.system(size: 26, weight: .semibold))
+                                        .foregroundColor(.white)
+                                } else {
+                                    Text(initials.isEmpty ? "?" : initials)
+                                        .font(.system(size: 22, weight: .semibold))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(isSelected ? HSColor.blue : .clear, lineWidth: 2.5)
+                                .padding(-2.5)
+                        )
+                        .shadow(color: grad.last?.opacity(0.45) ?? .clear, radius: isSelected ? 10 : 7, x: 0, y: 4)
+
+                    Circle()
+                        .fill(HSColor.background)
+                        .frame(width: 18, height: 18)
+                        .overlay(
+                            Circle()
+                                .fill(isSelected ? HSColor.blue : badgeColor)
+                                .padding(3)
+                        )
+                }
+
+                Text(peer.name)
+                    .font(.system(size: 12, weight: isSelected ? .bold : .regular))
+                    .foregroundColor(isSelected ? HSColor.blue : HSColor.label)
+                    .lineLimit(1)
+                    .frame(width: 72)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ScanningAvatarView: View {
+    @State private var p: Double = 0
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                ForEach(0..<2, id: \.self) { i in
+                    let pp = (p + Double(i) * 0.5).truncatingRemainder(dividingBy: 1.0)
+                    Circle()
+                        .stroke(HSColor.blue.opacity((1.0 - pp) * 0.5), lineWidth: 1.5)
+                        .frame(width: CGFloat(66 * (0.45 + 0.55 * pp)), height: CGFloat(66 * (0.45 + 0.55 * pp)))
+                }
+                Circle()
+                    .fill(HSColor.blue)
+                    .frame(width: 30, height: 30)
+                    .overlay(
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                    )
+            }
+            .frame(width: 66, height: 66)
+
+            Text("Buscando")
+                .font(.system(size: 12))
+                .foregroundColor(HSColor.secondary)
+        }
+        .frame(width: 72)
+        .onAppear {
+            withAnimation(.linear(duration: 1.8).repeatForever(autoreverses: false)) {
+                p = 1.0
+            }
+        }
+    }
+}
+
+private struct RefreshAvatarView: View {
+    let action: () -> Void
+    @State private var angle: Double = 0
+
+    var body: some View {
+        Button {
+            angle += 360
+            action()
+        } label: {
+            VStack(spacing: 8) {
+                Circle()
+                    .fill(HSColor.card)
+                    .frame(width: 66, height: 66)
+                    .overlay(
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundColor(HSColor.blue)
+                            .rotationEffect(.degrees(angle))
+                            .animation(.easeOut(duration: 0.65), value: angle)
+                    )
+                Text("Actualizar")
+                    .font(.system(size: 12))
+                    .foregroundColor(HSColor.secondary)
+            }
+            .frame(width: 72)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ManualIpAvatarView: View {
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
-            HStack {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Continuidad")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.75))
-                    Text(isReady ? "Activo" : "Activar")
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(.white)
-                    Text(statusText)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.85))
-                        .lineLimit(2)
-
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(peerCount > 0 ? HSColor.green : HSColor.orange)
-                            .frame(width: 8, height: 8)
-                        Text("\(peerCount)")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.16), in: Capsule())
-                }
-
-                Spacer()
-
-                ZStack {
-                    Circle()
-                        .stroke(Color.white.opacity(0.18), lineWidth: 1.5)
-                        .frame(width: 82, height: 82)
-                    Circle()
-                        .stroke(Color.white.opacity(0.28), lineWidth: 1.5)
-                        .frame(width: 62, height: 62)
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 44, height: 44)
-                        .overlay(
-                            Image(systemName: isHolding ? "hand.draw.fill" : "hand.raised.fill")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(HSColor.blue)
-                        )
-                }
+            VStack(spacing: 8) {
+                Circle()
+                    .fill(HSColor.card)
+                    .frame(width: 66, height: 66)
+                    .overlay(
+                        Image(systemName: "link.badge.plus")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundColor(HSColor.indigo)
+                    )
+                Text("Por IP")
+                    .font(.system(size: 12))
+                    .foregroundColor(HSColor.secondary)
             }
-            .padding(20)
-            .background(
-                LinearGradient(
-                    colors: isReady
-                        ? [Color(red: 0.05, green: 0.25, blue: 0.58), Color(red: 0.08, green: 0.45, blue: 0.88)]
-                        : [Color(red: 0.19, green: 0.20, blue: 0.23), Color(red: 0.11, green: 0.12, blue: 0.14)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
-            )
+            .frame(width: 72)
         }
         .buttonStyle(.plain)
     }

@@ -1,5 +1,6 @@
 import AVKit
 import Photos
+import PhotosUI
 import SwiftUI
 
 struct GalleryTabView: View {
@@ -8,190 +9,264 @@ struct GalleryTabView: View {
     @ObservedObject private var history = TransferHistoryStore.shared
     let onOpenViewer: (PHAsset) -> Void
 
-    @State private var selectedFilter: GalleryFilter = .all
-    @State private var isMultiSelectMode = false
+    @State private var selectedFilterIndex = 0
+    @State private var selectionMode = false
     @State private var selectedIds: [String] = []
+    @State private var pickerItems: [PhotosPickerItem] = []
 
+    private let filters = ["Todo", "Fotos", "Videos", "Recibidos", "Enviados"]
     private let columns = [
-        GridItem(.flexible(), spacing: 3),
-        GridItem(.flexible(), spacing: 3),
-        GridItem(.flexible(), spacing: 3)
+        GridItem(.flexible(), spacing: 2),
+        GridItem(.flexible(), spacing: 2),
+        GridItem(.flexible(), spacing: 2)
     ]
 
     private var filteredAssets: [PHAsset] {
         let all = photos.assets
-        switch selectedFilter {
-        case .all:
-            return all
-        case .photos:
+        switch selectedFilterIndex {
+        case 1:
             return all.filter { $0.mediaType == .image }
-        case .videos:
+        case 2:
             return all.filter { $0.mediaType == .video }
-        case .received:
+        case 3:
             let ids = Set(history.records.filter { !$0.isSender }.compactMap { $0.localAssetIdentifier })
             return all.filter { ids.contains($0.localIdentifier) }
-        case .sent:
+        case 4:
             let ids = Set(history.records.filter { $0.isSender }.compactMap { $0.localAssetIdentifier })
             return all.filter { ids.contains($0.localIdentifier) }
+        default:
+            return all
         }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Galería")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(HSColor.label)
-                Spacer()
-
-                Button {
-                    withAnimation {
-                        isMultiSelectMode.toggle()
-                        if !isMultiSelectMode {
-                            selectedIds.removeAll()
-                        }
-                    }
-                } label: {
-                    Text(isMultiSelectMode ? "Listo" : "Seleccionar")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(HSColor.blue)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(HSColor.card, in: Capsule())
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(GalleryFilter.allCases) { filter in
-                        let active = selectedFilter == filter
-                        Button {
-                            selectedFilter = filter
-                        } label: {
-                            Text(filter.rawValue)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(active ? .white : HSColor.label)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(active ? HSColor.blue : HSColor.card, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-            }
-
-            if !photos.isAuthorized {
-                Spacer()
-                VStack(spacing: 14) {
-                    Image(systemName: "photo.on.rectangle.angled")
-                        .font(.system(size: 46))
-                        .foregroundColor(HSColor.blue)
-                    Text("Autoriza acceso a tus Fotos")
-                        .font(.system(size: 18, weight: .bold))
-                    Text("Para abrir cualquier foto o video y usar el gesto ✋ → ✊ igual que en Android.")
-                        .font(.system(size: 14))
-                        .foregroundColor(HSColor.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 36)
-                    Button("Permitir Fototeca") {
-                        Task { _ = await photos.requestAuthorization() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(HSColor.blue)
-                }
-                Spacer()
-            } else if filteredAssets.isEmpty {
-                Spacer()
-                VStack(spacing: 10) {
-                    Image(systemName: "photo")
-                        .font(.system(size: 40))
-                        .foregroundColor(HSColor.secondary)
-                    Text("No hay elementos en este filtro")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(HSColor.secondary)
-                }
-                Spacer()
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 3) {
-                        ForEach(filteredAssets, id: \.localIdentifier) { asset in
-                            let selIdx = selectedIds.firstIndex(of: asset.localIdentifier)
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                LargeTitleBar(title: "Galería") {
+                    HStack(spacing: 8) {
+                        if selectionMode && !selectedIds.isEmpty {
                             Button {
-                                if isMultiSelectMode {
-                                    toggleSelection(asset.localIdentifier)
-                                } else {
-                                    onOpenViewer(asset)
-                                }
+                                sendSelectedBatch()
                             } label: {
-                                ZStack(alignment: .topTrailing) {
-                                    PHAssetThumbnailView(asset: asset, size: CGSize(width: 240, height: 240))
-                                        .aspectRatio(1, contentMode: .fill)
-
-                                    if isMultiSelectMode {
-                                        ZStack {
-                                            Circle()
-                                                .fill(selIdx != nil ? HSColor.blue : Color.black.opacity(0.35))
-                                                .frame(width: 24, height: 24)
-                                                .overlay(Circle().stroke(Color.white, lineWidth: 1.5))
-                                            if let selIdx {
-                                                Text("\(selIdx + 1)")
-                                                    .font(.system(size: 11.5, weight: .bold))
-                                                    .foregroundColor(.white)
-                                            }
-                                        }
-                                        .padding(6)
-                                    }
-                                }
+                                Text("Enviar")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 7)
+                                    .background(HSColor.blue, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
+
+                        Button {
+                            HapticEngine.shared.subtleTap()
+                            withAnimation {
+                                selectionMode.toggle()
+                                if !selectionMode { selectedIds.removeAll() }
+                            }
+                        } label: {
+                            Text(selectionMode ? "Cancelar" : "Seleccionar")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(selectionMode ? HSColor.label : HSColor.blue)
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 7)
+                                .background(
+                                    selectionMode ? HSColor.fill : HSColor.blue.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                )
+                        }
+                        .buttonStyle(.plain)
+
+                        PhotosPicker(
+                            selection: $pickerItems,
+                            maxSelectionCount: 20,
+                            matching: .any(of: [.images, .videos]),
+                            photoLibrary: .shared()
+                        ) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(HSColor.blue)
+                                .frame(width: 38, height: 38)
+                                .background(HSColor.card, in: Circle())
+                        }
                     }
-                    .padding(.bottom, 120)
+                }
+
+                IosSegmentedControlBar(options: filters, selected: $selectedFilterIndex)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+
+                if selectionMode {
+                    HStack {
+                        Text(selectedIds.isEmpty
+                             ? "Toca varias fotos o videos para seleccionarlos"
+                             : "\(selectedIds.count) seleccionados")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(HSColor.blue)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 4)
+                } else {
+                    Spacer().frame(height: 10)
+                }
+
+                if !photos.isAuthorized {
+                    Spacer()
+                    VStack(spacing: 14) {
+                        Circle()
+                            .fill(HSColor.fill)
+                            .frame(width: 76, height: 76)
+                            .overlay(
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(HSColor.blue)
+                            )
+                        Text("Autoriza tu Fototeca")
+                            .font(.system(size: 16, weight: .bold))
+                        Text("Para ver todas tus fotos y videos aquí igual que en Android.")
+                            .font(.system(size: 13.5))
+                            .foregroundColor(HSColor.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 36)
+                        Button("Permitir Fototeca") {
+                            Task { _ = await photos.requestAuthorization() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(HSColor.blue)
+                    }
+                    .padding(.bottom, 100)
+                    Spacer()
+                } else if filteredAssets.isEmpty {
+                    Spacer()
+                    VStack(spacing: 14) {
+                        Circle()
+                            .fill(HSColor.fill)
+                            .frame(width: 76, height: 76)
+                            .overlay(
+                                Image(systemName: selectedFilterIndex == 3 ? "square.and.arrow.down" : (selectedFilterIndex == 4 ? "paperplane.fill" : "photo.on.rectangle"))
+                                    .font(.system(size: 30))
+                                    .foregroundColor(HSColor.secondary)
+                            )
+                        Text(emptyLabel)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(HSColor.secondary)
+                        CircleIconButton(icon: "arrow.clockwise", tint: HSColor.blue) {
+                            photos.reloadAssets()
+                        }
+                    }
+                    .padding(.bottom, 100)
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 2) {
+                            ForEach(filteredAssets, id: \.localIdentifier) { asset in
+                                let selIndex = selectedIds.firstIndex(of: asset.localIdentifier)
+                                let isSelected = selIndex != nil
+                                Button {
+                                    if selectionMode {
+                                        toggleSelection(asset.localIdentifier)
+                                    } else {
+                                        onOpenViewer(asset)
+                                    }
+                                } label: {
+                                    ZStack(alignment: .topTrailing) {
+                                        PHAssetThumbnailView(asset: asset, size: CGSize(width: 240, height: 240))
+                                            .aspectRatio(1, contentMode: .fill)
+                                            .scaleEffect(isSelected ? 0.90 : 1.0)
+                                            .animation(.spring(response: 0.25, dampingFraction: 0.72), value: isSelected)
+
+                                        if isSelected {
+                                            Rectangle()
+                                                .fill(HSColor.blue.opacity(0.24))
+                                                .overlay(Rectangle().stroke(HSColor.blue, lineWidth: 2.5))
+                                        }
+
+                                        if selectionMode {
+                                            ZStack {
+                                                Circle()
+                                                    .fill(isSelected ? HSColor.blue : Color.black.opacity(0.42))
+                                                    .frame(width: 24, height: 24)
+                                                    .overlay(Circle().stroke(Color.white, lineWidth: 1.5))
+                                                if let selIndex {
+                                                    Text("\(selIndex + 1)")
+                                                        .font(.system(size: 12, weight: .bold))
+                                                        .foregroundColor(.white)
+                                                }
+                                            }
+                                            .padding(7)
+                                        }
+                                    }
+                                    .background(HSColor.fill)
+                                }
+                                .buttonStyle(.plain)
+                                .simultaneousGesture(
+                                    LongPressGesture(minimumDuration: 0.35).onEnded { _ in
+                                        HapticEngine.shared.grabSuccess()
+                                        if !selectionMode { selectionMode = true }
+                                        if !selectedIds.contains(asset.localIdentifier), selectedIds.count < 20 {
+                                            selectedIds.append(asset.localIdentifier)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        .padding(.bottom, !selectedIds.isEmpty ? 185 : 120)
+                    }
                 }
             }
 
-            if isMultiSelectMode && !selectedIds.isEmpty {
-                HStack {
-                    Text("\(selectedIds.count) seleccionada(s)")
-                        .font(.system(size: 14.5, weight: .semibold))
-                        .foregroundColor(HSColor.label)
-                    Spacer()
-                    Button {
-                        let assets = selectedIds.compactMap { id in
-                            filteredAssets.first(where: { $0.localIdentifier == id })
-                        }
-                        isMultiSelectMode = false
-                        selectedIds.removeAll()
-                        coordinator.grabMultipleAssets(assets)
-                    } label: {
-                        Label("Enviar / Agarrar", systemImage: "paperplane.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(HSColor.blue, in: Capsule())
-                    }
+            if selectionMode && !selectedIds.isEmpty {
+                Button {
+                    sendSelectedBatch()
+                } label: {
+                    Text("Enviar")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 11)
+                        .background(HSColor.blue, in: Capsule())
+                        .shadow(color: HSColor.blue.opacity(0.45), radius: 12, x: 0, y: 6)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(.ultraThinMaterial)
-                .padding(.bottom, 76)
+                .buttonStyle(.plain)
+                .padding(.bottom, 108)
             }
         }
         .background(HSColor.background)
+        .onChange(of: pickerItems) { newItems in
+            guard !newItems.isEmpty else { return }
+            Task {
+                await coordinator.handlePhotosPickerSelection(newItems)
+                pickerItems = []
+            }
+        }
+    }
+
+    private var emptyLabel: String {
+        switch selectedFilterIndex {
+        case 3: return "Aún no has recibido fotos ni videos"
+        case 4: return "Aún no has enviado fotos ni videos"
+        default: return "No se encontraron archivos"
+        }
     }
 
     private func toggleSelection(_ id: String) {
+        HapticEngine.shared.subtleTap()
         if let idx = selectedIds.firstIndex(of: id) {
             selectedIds.remove(at: idx)
         } else if selectedIds.count < 20 {
             selectedIds.append(id)
         }
-        HapticEngine.shared.subtleTap()
+    }
+
+    private func sendSelectedBatch() {
+        HapticEngine.shared.grabSuccess()
+        let assets = selectedIds.compactMap { id in
+            filteredAssets.first(where: { $0.localIdentifier == id })
+        }
+        selectionMode = false
+        selectedIds.removeAll()
+        coordinator.grabMultipleAssets(assets)
     }
 }
 
@@ -279,7 +354,6 @@ struct FullscreenMediaViewerView: View {
                 }
             }
 
-            // Floating Aurora Bubble inside viewer
             AirAuroraBubbleView(
                 isRadarActive: coordinator.isRadarActive,
                 isHoldingCard: coordinator.isHoldingCard,
@@ -288,7 +362,6 @@ struct FullscreenMediaViewerView: View {
                 coordinator.toggleRadar(for: currentAsset)
             }
 
-            // Simulator HUD (when radar is on & simulator controls enabled)
             if coordinator.isRadarActive && prefs.showSimulatorDevControls {
                 VStack {
                     Spacer()
@@ -334,8 +407,7 @@ private struct FullAssetPageView: View {
         .task(id: asset.localIdentifier) {
             if asset.mediaType == .video {
                 if let av = await PhotoLibraryService.shared.requestAVAsset(for: asset) {
-                    let item = AVPlayerItem(asset: av)
-                    player = AVPlayer(playerItem: item)
+                    player = AVPlayer(playerItem: AVPlayerItem(asset: av))
                 }
             } else {
                 fullImage = await PhotoLibraryService.shared.requestFullImage(for: asset)

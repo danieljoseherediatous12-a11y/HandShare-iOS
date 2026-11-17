@@ -32,6 +32,9 @@ struct RootContainerView: View {
     @State private var activeTab: HSTab = .home
     @State private var viewerAssetBox: ViewerAssetBox?
     @State private var showManualConnect = false
+    @State private var showProfileSheet = false
+    @State private var showPreferencesSheet = false
+    @State private var showWelcomeSheet = false
     @State private var activeGuide: IdentifiableGuideMode?
 
     var body: some View {
@@ -42,10 +45,8 @@ struct RootContainerView: View {
                 mainWorkspace
             }
 
-            // Global edge glow aura
             EdgeGlowOverlayView(isVisible: coordinator.isEdgeGlowVisible)
 
-            // Compact top pill when viewing or gesturing already-queued photo
             if coordinator.showAlreadySelectedPill {
                 VStack {
                     AlreadySelectedPillView()
@@ -56,7 +57,6 @@ struct RootContainerView: View {
                 .allowsHitTesting(false)
             }
 
-            // Floating Held Card (Suction hold + stack + dock)
             if coordinator.isHoldingCard {
                 FloatingHeldCardView(
                     previewImage: coordinator.floatingPreviewImage,
@@ -77,7 +77,6 @@ struct RootContainerView: View {
                 .transition(.scale(scale: 0.92).combined(with: .opacity))
             }
 
-            // Waiting-to-catch prompt when files arrive from PC/Android
             if coordinator.status == .waitingToCatch {
                 VStack {
                     HStack(spacing: 10) {
@@ -114,7 +113,6 @@ struct RootContainerView: View {
                 }
             }
 
-            // Catch landing overlay after opening palm
             if let message = coordinator.caughtBannerMessage {
                 CatchLandingOverlayView(
                     message: message,
@@ -130,6 +128,31 @@ struct RootContainerView: View {
         .sheet(isPresented: $showManualConnect) {
             ManualConnectSheetView(coordinator: coordinator) {
                 showManualConnect = false
+            }
+        }
+        .sheet(isPresented: $showProfileSheet) {
+            DeviceProfileAndEngineSheetView(
+                coordinator: coordinator,
+                onDismiss: { showProfileSheet = false },
+                onOpenWelcome: {
+                    showProfileSheet = false
+                    showWelcomeSheet = true
+                }
+            )
+        }
+        .sheet(isPresented: $showPreferencesSheet) {
+            UserPreferencesSheetView(
+                coordinator: coordinator,
+                onDismiss: { showPreferencesSheet = false },
+                onOpenWelcome: {
+                    showPreferencesSheet = false
+                    showWelcomeSheet = true
+                }
+            )
+        }
+        .fullScreenCover(isPresented: $showWelcomeSheet) {
+            OnboardingView(coordinator: coordinator) {
+                showWelcomeSheet = false
             }
         }
         .sheet(item: $activeGuide) { guide in
@@ -210,9 +233,15 @@ struct RootContainerView: View {
                         showManualConnect = true
                     }
                 case .settings:
-                    SettingsTabView(coordinator: coordinator) { isSender in
-                        activeGuide = IdentifiableGuideMode(isSender: isSender)
-                    }
+                    SettingsTabView(
+                        coordinator: coordinator,
+                        onOpenProfile: { showProfileSheet = true },
+                        onOpenPreferences: { showPreferencesSheet = true },
+                        onOpenWelcome: { showWelcomeSheet = true },
+                        onOpenGuide: { isSender in
+                            activeGuide = IdentifiableGuideMode(isSender: isSender)
+                        }
+                    )
                 }
             }
 
