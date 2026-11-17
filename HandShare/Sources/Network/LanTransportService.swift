@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Network
+import UIKit
 
 @MainActor
 final class LanTransportService: ObservableObject {
@@ -18,8 +19,8 @@ final class LanTransportService: ObservableObject {
     var onIncomingFileReady: ((String, StagedIncomingItem) -> Void)?
     var onPeerConnected: ((HandSharePeer) -> Void)?
 
-    private let ioQueue = DispatchQueue(label: "com.handshare.lan.io", qos: .userInitiated)
-    private let udpRxQueue = DispatchQueue(label: "com.handshare.lan.udprx", qos: .utility)
+    private nonisolated let ioQueue = DispatchQueue(label: "com.handshare.lan.io", qos: .userInitiated)
+    private nonisolated let udpRxQueue = DispatchQueue(label: "com.handshare.lan.udprx", qos: .utility)
 
     private var pathMonitor: NWPathMonitor?
     private var tcpListener: NWListener?
@@ -30,12 +31,12 @@ final class LanTransportService: ObservableObject {
     private nonisolated(unsafe) var udpSocketFd: Int32 = -1
     private nonisolated(unsafe) var udpStopFlag = false
 
-    private let stateLock = NSLock()
+    private nonisolated let stateLock = NSLock()
     private nonisolated(unsafe) var peerRecords: [String: PeerRecord] = [:]
     private nonisolated(unsafe) var sessions: [String: TcpPeerSession] = [:]
     private nonisolated(unsafe) var pendingOutbound: [TcpPeerSession] = []
 
-    let localPeerId: String
+    nonisolated let localPeerId: String
 
     private final class PeerRecord {
         let endpointId: String
@@ -271,8 +272,8 @@ final class LanTransportService: ObservableObject {
                         let total = max(state.metadata.sizeBytes, state.receivedBytes)
                         let fileName = state.metadata.fileName
                         let received = state.receivedBytes
-                        DispatchQueue.main.async {
-                            owner.onIncomingProgress?(ep, frame.payloadId, received, total)
+                        Task { @MainActor [weak owner] in
+                            owner?.onIncomingProgress?(ep, frame.payloadId, received, total)
                             _ = fileName
                         }
                     }
@@ -293,9 +294,9 @@ final class LanTransportService: ObservableObject {
                     let peerName = owner.peerName(for: ep)
                     let item = StagedIncomingItem(fileURL: finalURL, metadata: corrected, senderName: peerName)
                     let total = max(corrected.sizeBytes, state.receivedBytes)
-                    DispatchQueue.main.async {
-                        owner.onIncomingProgress?(ep, frame.payloadId, state.receivedBytes, total)
-                        owner.onIncomingFileReady?(ep, item)
+                    Task { @MainActor [weak owner] in
+                        owner?.onIncomingProgress?(ep, frame.payloadId, state.receivedBytes, total)
+                        owner?.onIncomingFileReady?(ep, item)
                     }
                 }
 
@@ -424,7 +425,7 @@ final class LanTransportService: ObservableObject {
         }
     }
 
-    func connectManual(ip: String, port: Int = LanProtocol.tcpPort, completion: @escaping @MainActor (HandSharePeer?) -> Void) {
+    func connectManual(ip: String, port: Int = LanProtocol.tcpPort, completion: @MainActor @escaping (HandSharePeer?) -> Void) {
         let cleanIp = ip.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanIp.isEmpty else {
             Task { @MainActor in completion(nil) }
@@ -803,7 +804,10 @@ final class LanTransportService: ObservableObject {
             }
             Thread.sleep(forTimeInterval: 0.025)
         }
-        return sessions[endpointId]
+        stateLock.lock()
+        let active = sessions[endpointId]
+        stateLock.unlock()
+        return active
     }
 
     private nonisolated func registerDiscoveredPeer(beacon: LanPeerBeacon, ip: String) {

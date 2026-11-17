@@ -13,11 +13,11 @@ final class CameraHandDetector: NSObject, ObservableObject {
 
     let grabEvents = PassthroughSubject<Int64, Never>()
 
-    private let stateMachine = GrabStateMachine()
-    private let session = AVCaptureSession()
-    private let sessionQueue = DispatchQueue(label: "com.handshare.camera.session")
-    private let outputQueue = DispatchQueue(label: "com.handshare.camera.vision")
-    private let handPoseRequest: VNDetectHumanHandPoseRequest = {
+    private nonisolated let stateMachine = GrabStateMachine()
+    private nonisolated let session = AVCaptureSession()
+    private nonisolated let sessionQueue = DispatchQueue(label: "com.handshare.camera.session")
+    private nonisolated let outputQueue = DispatchQueue(label: "com.handshare.camera.vision")
+    private nonisolated let handPoseRequest: VNDetectHumanHandPoseRequest = {
         let req = VNDetectHumanHandPoseRequest()
         req.maximumHandCount = 1
         return req
@@ -174,7 +174,7 @@ final class CameraHandDetector: NSObject, ObservableObject {
 
     // MARK: - Private Camera Setup
 
-    private func configureSession() {
+    private nonisolated func configureSession() {
         session.beginConfiguration()
         session.sessionPreset = .vga640x480
 
@@ -182,8 +182,8 @@ final class CameraHandDetector: NSObject, ObservableObject {
               let input = try? AVCaptureDeviceInput(device: device),
               session.canAddInput(input) else {
             session.commitConfiguration()
-            DispatchQueue.main.async {
-                self.cameraUnavailableReason = "Cámara frontal no disponible"
+            Task { @MainActor [weak self] in
+                self?.cameraUnavailableReason = "Cámara frontal no disponible"
             }
             return
         }
@@ -223,7 +223,7 @@ final class CameraHandDetector: NSObject, ObservableObject {
             sensitivity: sensitivityStorage,
             nowMs: nowMs
         )
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             self.gestureState = decision.state
             if let haptic = decision.haptic {
@@ -317,7 +317,7 @@ extension CameraHandDetector: AVCaptureVideoDataOutputSampleBufferDelegate {
             try handler.perform([handPoseRequest])
             let obs = handPoseRequest.results?.first
             if let obs, let result = Self.analyzeObservation(obs) {
-                DispatchQueue.main.async { [weak self] in
+                Task { @MainActor [weak self] in
                     self?.handVisible = true
                 }
                 _ = processGeometry(
@@ -331,7 +331,7 @@ extension CameraHandDetector: AVCaptureVideoDataOutputSampleBufferDelegate {
                     strictIntentMode: strictModeStorage,
                     nowMs: Self.uptimeMs()
                 )
-                DispatchQueue.main.async { [weak self] in
+                Task { @MainActor [weak self] in
                     self?.handVisible = false
                     self?.gestureState = lostState
                 }
