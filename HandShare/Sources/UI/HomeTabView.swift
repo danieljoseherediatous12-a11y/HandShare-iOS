@@ -53,7 +53,7 @@ struct HomeTabView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 LargeTitleBar(title: "HandShare") {
-                    CircleIconButton(icon: "gearshape.fill") {
+                    CircleIconButton(icon: "gearshape.fill", accessibilityTitle: "Ajustes") {
                         withAnimation { activeTab = .settings }
                     }
                 }
@@ -64,12 +64,13 @@ struct HomeTabView: View {
                     nearbyCount: lan.peers.count
                 ) {
                     if !photos.isAuthorized {
-                        Task { _ = await photos.requestAuthorization() }
+                        Task { _ = await photos.requestAuthorizationOrOpenSettings() }
                     } else {
                         withAnimation { activeTab = .gallery }
                     }
                 }
                 .padding(.horizontal, 16)
+                .accessibilityIdentifier("home_hero_card")
 
                 Spacer().frame(height: 14)
 
@@ -82,29 +83,32 @@ struct HomeTabView: View {
                         color: HSColor.blue
                     ) {
                         lan.refreshDiscovery()
+                        if !lan.isWifiAvailable {
+                            openSystemAppSettings()
+                        }
                     }
                     controlToggle(
                         icon: "bonjour",
                         label: "Red local",
-                        active: true,
+                        active: lan.isWifiAvailable,
                         color: HSColor.indigo,
                         action: onOpenManualConnect
                     )
                     controlToggle(
                         icon: detector.cameraPermissionGranted ? "camera.fill" : "camera",
                         label: "Cámara",
-                        active: detector.cameraPermissionGranted,
+                        active: detector.cameraPermissionGranted && detector.hasFrontCamera,
                         color: HSColor.green
                     ) {
-                        Task { await detector.requestPermissionAndStart() }
+                        Task { _ = await detector.requestPermissionOrOpenSettings() }
                     }
                     controlToggle(
                         icon: "photo.fill",
-                        label: "Gestos",
+                        label: "Fototeca",
                         active: photos.isAuthorized,
                         color: HSColor.green
                     ) {
-                        Task { _ = await photos.requestAuthorization() }
+                        Task { _ = await photos.requestAuthorizationOrOpenSettings() }
                     }
                 }
                 .padding(.vertical, 16)
@@ -323,6 +327,8 @@ struct HomeTabView: View {
             .background(HSColor.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(asset == nil)
+        .accessibilityLabel(record.isSender ? "Enviado \(record.fileName) a \(record.remoteName)" : "Recibido \(record.fileName) de \(record.remoteName)")
     }
 
     private func controlToggle(
@@ -349,6 +355,7 @@ struct HomeTabView: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(label), \(active ? "activo" : "inactivo")")
     }
 
     private func gestureTile(
@@ -386,6 +393,7 @@ struct HomeTabView: View {
             .background(HSColor.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Guía de \(title)")
     }
 }
 
@@ -570,6 +578,7 @@ private struct DeviceAvatarView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(peer.name), \(peer.isConnected ? "conectado" : "disponible")")
     }
 }
 
@@ -636,6 +645,7 @@ private struct RefreshAvatarView: View {
             .frame(width: 72)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Actualizar dispositivos cercanos")
     }
 }
 
@@ -660,5 +670,6 @@ private struct ManualIpAvatarView: View {
             .frame(width: 72)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Conectar por dirección IP")
     }
 }

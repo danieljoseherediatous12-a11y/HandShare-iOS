@@ -19,7 +19,7 @@ struct DevicesTabView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 LargeTitleBar(title: "Dispositivos") {
-                    CircleIconButton(icon: "arrow.clockwise", tint: HSColor.blue) {
+                    CircleIconButton(icon: "arrow.clockwise", tint: HSColor.blue, accessibilityTitle: "Actualizar dispositivos") {
                         lan.refreshDiscovery()
                     }
                 }
@@ -28,7 +28,10 @@ struct DevicesTabView: View {
                     peers: lan.peers,
                     deviceName: prefs.deviceName,
                     localIp: lan.localIPAddress
-                )
+                ) { peer in
+                    coordinator.selectPeer(peer)
+                    HapticEngine.shared.subtleTap()
+                }
                 .padding(.horizontal, 16)
 
                 GroupCaptionText(text: "CERCANOS")
@@ -61,23 +64,15 @@ struct DevicesTabView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
                             TextField("Ej. 192.168.101.2", text: $manualIp)
-                                .keyboardType(.decimalPad)
+                                .keyboardType(.numbersAndPunctuation)
+                                .submitLabel(.go)
+                                .onSubmit { connectDirectIp() }
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 9)
                                 .background(HSColor.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                             Button {
-                                connectingManual = true
-                                manualStatusMessage = nil
-                                lan.connectManual(ip: manualIp, port: LanProtocol.tcpPort) { peer in
-                                    connectingManual = false
-                                    if let peer {
-                                        coordinator.selectPeer(peer)
-                                        manualIp = ""
-                                    } else {
-                                        manualStatusMessage = "Sin respuesta en \(manualIp):47832"
-                                    }
-                                }
+                                connectDirectIp()
                             } label: {
                                 Text(connectingManual ? "..." : "Conectar")
                                     .font(.system(size: 13.5, weight: .semibold))
@@ -88,6 +83,7 @@ struct DevicesTabView: View {
                             }
                             .buttonStyle(.plain)
                             .disabled(connectingManual || manualIp.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .accessibilityIdentifier("devices_connect_ip_btn")
                         }
                         if let msg = manualStatusMessage {
                             Text(msg)
@@ -106,12 +102,30 @@ struct DevicesTabView: View {
         }
         .background(HSColor.background)
     }
+
+    private func connectDirectIp() {
+        let trimmed = manualIp.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !connectingManual else { return }
+        hideKeyboard()
+        connectingManual = true
+        manualStatusMessage = nil
+        lan.connectManual(ip: trimmed, port: LanProtocol.tcpPort) { peer in
+            connectingManual = false
+            if let peer {
+                coordinator.selectPeer(peer)
+                manualIp = ""
+            } else {
+                manualStatusMessage = "Sin respuesta en \(trimmed):\(LanProtocol.tcpPort)"
+            }
+        }
+    }
 }
 
 private struct RadarCardView: View {
     let peers: [HandSharePeer]
     let deviceName: String
     let localIp: String?
+    let onSelectPeer: (HandSharePeer) -> Void
 
     @State private var sweep: Double = 0
 
@@ -136,16 +150,22 @@ private struct RadarCardView: View {
                     let angle = (Double(idx) / Double(total)) * 2.0 * .pi - (.pi / 2.0)
                     let radius: CGFloat = peer.isConnected ? 52 : 76
                     let grad = HSColor.avatarGradients[idx % HSColor.avatarGradients.count]
-                    Circle()
-                        .fill(LinearGradient(colors: grad, startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 38, height: 38)
-                        .shadow(color: .black.opacity(0.18), radius: 5, x: 0, y: 3)
-                        .overlay(
-                            Text(String(peer.name.prefix(1)).uppercased())
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(.white)
-                        )
-                        .offset(x: cos(angle) * radius, y: sin(angle) * radius)
+                    Button {
+                        onSelectPeer(peer)
+                    } label: {
+                        Circle()
+                            .fill(LinearGradient(colors: grad, startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 38, height: 38)
+                            .shadow(color: .black.opacity(0.18), radius: 5, x: 0, y: 3)
+                            .overlay(
+                                Text(String(peer.name.prefix(1)).uppercased())
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(.white)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Seleccionar \(peer.name)")
+                    .offset(x: cos(angle) * radius, y: sin(angle) * radius)
                 }
 
                 Circle()
@@ -301,22 +321,21 @@ struct SettingsTabView: View {
                 IosGroupCard {
                     settingsRow("photo.fill", HSColor.green, "Fototeca", enabled: photos.isAuthorized) {
                         if photos.isAuthorized {
-                            openIosSettings()
+                            openSystemAppSettings()
                         } else {
-                            Task { _ = await photos.requestAuthorization() }
+                            Task { _ = await photos.requestAuthorizationOrOpenSettings() }
                         }
                     }
                     RowDividerLine()
-                    settingsRow("camera.fill", HSColor.gray, "Cámara", enabled: detector.cameraPermissionGranted) {
-                        if detector.cameraPermissionGranted {
-                            openIosSettings()
-                        } else {
-                            Task { await detector.requestPermissionAndStart() }
-                        }
+                    settingsRow("camera.fill", HSColor.gray, "Cámara", enabled: detector.cameraPermissionGranted && detector.hasFrontCamera) {
+                        Task { _ = await detector.requestPermissionOrOpenSettings() }
                     }
                     RowDividerLine()
                     settingsRow("wifi", HSColor.blue, "Red local Wi‑Fi", enabled: lan.isWifiAvailable) {
                         lan.refreshDiscovery()
+                        if !lan.isWifiAvailable {
+                            openSystemAppSettings()
+                        }
                     }
                 }
 
@@ -402,12 +421,6 @@ struct SettingsTabView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 13)
     }
-
-    private func openIosSettings() {
-        if let url = URL(string: UIApplication.openSettingsURLString) {
-            UIApplication.shared.open(url)
-        }
-    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -457,6 +470,7 @@ struct DeviceProfileAndEngineSheetView: View {
                                 .frame(width: 34, height: 34)
                                 .background(HSColor.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                             TextField("Nombre", text: $editedName)
+                                .onChange(of: editedName) { _ in nameSaved = false }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
                                 .background(HSColor.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -466,6 +480,7 @@ struct DeviceProfileAndEngineSheetView: View {
                                     prefs.deviceName = clean
                                     lan.updateDeviceName(clean)
                                     nameSaved = true
+                                    hideKeyboard()
                                 }
                             }
                             .buttonStyle(.borderedProminent)
@@ -483,14 +498,27 @@ struct DeviceProfileAndEngineSheetView: View {
                             .padding(.leading, 8)
                         VStack(spacing: 0) {
                             engineRow("eye.fill", HSColor.indigo, "Apple Vision 21-Landmark IA",
-                                      "Detección geométrica de palma abierta y puño", "Activo", HSColor.green) {}
+                                      coordinator.detector.cameraPermissionGranted
+                                          ? (coordinator.detector.hasFrontCamera ? "Detección de palma y puño activa" : "Sin cámara frontal en simulador")
+                                          : "Toca para activar permiso de cámara",
+                                      coordinator.detector.cameraPermissionGranted ? "Activo" : "Configurar",
+                                      coordinator.detector.cameraPermissionGranted ? HSColor.green : HSColor.orange) {
+                                Task { _ = await coordinator.detector.requestPermissionOrOpenSettings() }
+                            }
                             Divider().padding(.leading, 56)
                             engineRow("sparkles.rectangle.stack.fill", HSColor.cyan, "Visor Galería Air Hop",
-                                      "Tarjeta flotante, pila múltiple y aura en bordes", "Conectado", HSColor.green) {}
+                                      "Tarjeta flotante, pila múltiple y aura en bordes", "Ver guía", HSColor.blue) {
+                                onDismiss()
+                                onOpenWelcome()
+                            }
                             Divider().padding(.leading, 56)
                             engineRow("wifi", HSColor.green, "Red LAN P2P + Bonjour",
                                       lan.peers.isEmpty ? "Escuchando en UDP 47831 / TCP \(lan.activeTcpPort)" : "\(lan.peers.count) equipo(s) cercano(s)",
-                                      "P2P Listo", HSColor.blue) { lan.refreshDiscovery() }
+                                      lan.isWifiAvailable ? "P2P Listo" : "Revisar",
+                                      lan.isWifiAvailable ? HSColor.blue : HSColor.orange) {
+                                lan.refreshDiscovery()
+                                if !lan.isWifiAvailable { openSystemAppSettings() }
+                            }
                         }
                         .background(HSColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
@@ -565,6 +593,8 @@ struct UserPreferencesSheetView: View {
     let onDismiss: () -> Void
     let onOpenWelcome: () -> Void
 
+    @State private var historyCleared = false
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -598,18 +628,6 @@ struct UserPreferencesSheetView: View {
                                 }
                             }
                             .tint(HSColor.green)
-                            .padding(14)
-
-                            Divider().padding(.leading, 14)
-
-                            Toggle(isOn: $prefs.showSimulatorDevControls) {
-                                VStack(alignment: .leading) {
-                                    Text("Controles de prueba de simulador")
-                                    Text("Botones para simular gestos sin cámara física")
-                                        .font(.system(size: 12)).foregroundColor(HSColor.secondary)
-                                }
-                            }
-                            .tint(HSColor.blue)
                             .padding(14)
                         }
                         .background(HSColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -646,10 +664,12 @@ struct UserPreferencesSheetView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(HSColor.indigo)
 
-                        Button("Limpiar historial local") {
+                        Button(historyCleared ? "Historial limpiado ✓" : "Limpiar historial local") {
                             coordinator.history.clearHistory()
+                            historyCleared = true
+                            HapticEngine.shared.subtleTap()
                         }
-                        .foregroundColor(HSColor.red)
+                        .foregroundColor(historyCleared ? HSColor.green : HSColor.red)
                     }
                 }
                 .padding(20)
@@ -688,7 +708,9 @@ struct ManualConnectSheetView: View {
             Form {
                 Section("Conectar manualmente en Wi‑Fi") {
                     TextField("Ej. 192.168.101.2", text: $ipAddress)
-                        .keyboardType(.decimalPad)
+                        .keyboardType(.numbersAndPunctuation)
+                        .submitLabel(.go)
+                        .onSubmit { connectSheetNow() }
                     TextField("Puerto TCP (47832)", text: $portText)
                         .keyboardType(.numberPad)
                 }
@@ -703,18 +725,7 @@ struct ManualConnectSheetView: View {
 
                 Section {
                     Button {
-                        let port = Int(portText) ?? LanProtocol.tcpPort
-                        isConnecting = true
-                        errorMessage = nil
-                        coordinator.lan.connectManual(ip: ipAddress, port: port) { peer in
-                            isConnecting = false
-                            if let peer {
-                                coordinator.selectPeer(peer)
-                                onDismiss()
-                            } else {
-                                errorMessage = "No respondió ningún HandShare en \(ipAddress):\(port)."
-                            }
-                        }
+                        connectSheetNow()
                     } label: {
                         HStack {
                             if isConnecting { ProgressView() }
@@ -730,6 +741,24 @@ struct ManualConnectSheetView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cerrar", action: onDismiss)
                 }
+            }
+        }
+    }
+
+    private func connectSheetNow() {
+        let trimmedIp = ipAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedIp.isEmpty, !isConnecting else { return }
+        hideKeyboard()
+        let port = Int(portText) ?? LanProtocol.tcpPort
+        isConnecting = true
+        errorMessage = nil
+        coordinator.lan.connectManual(ip: trimmedIp, port: port) { peer in
+            isConnecting = false
+            if let peer {
+                coordinator.selectPeer(peer)
+                onDismiss()
+            } else {
+                errorMessage = "No respondió ningún HandShare en \(trimmedIp):\(port)."
             }
         }
     }

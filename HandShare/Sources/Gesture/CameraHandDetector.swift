@@ -8,8 +8,17 @@ final class CameraHandDetector: NSObject, ObservableObject {
     @Published private(set) var gestureState: GestureState = .idle
     @Published private(set) var handVisible: Bool = false
     @Published private(set) var isRunning: Bool = false
+    @Published private(set) var authorizationStatus: AVAuthorizationStatus = .notDetermined
     @Published private(set) var cameraPermissionGranted: Bool = false
     @Published private(set) var cameraUnavailableReason: String?
+
+    var hasFrontCamera: Bool {
+        AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) != nil
+    }
+
+    var isDeniedOrRestricted: Bool {
+        authorizationStatus == .denied || authorizationStatus == .restricted
+    }
 
     let grabEvents = PassthroughSubject<Int64, Never>()
 
@@ -27,7 +36,6 @@ final class CameraHandDetector: NSObject, ObservableObject {
     private nonisolated(unsafe) var isConfigured = false
     private nonisolated(unsafe) var strictModeStorage = true
     private nonisolated(unsafe) var sensitivityStorage = 1
-    private var simAutoResetTask: Task<Void, Never>?
 
     var strictIntentMode: Bool = true {
         didSet { strictModeStorage = strictIntentMode }
@@ -46,43 +54,66 @@ final class CameraHandDetector: NSObject, ObservableObject {
 
     func refreshPermissionStatus() {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
+        authorizationStatus = status
         cameraPermissionGranted = (status == .authorized)
+        if cameraPermissionGranted && hasFrontCamera {
+            if cameraUnavailableReason?.contains("Ajustes") == true || cameraUnavailableReason?.contains("denegado") == true {
+                cameraUnavailableReason = nil
+            }
+        }
     }
 
-    func requestPermissionAndStart() async {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        if status == .authorized {
-            cameraPermissionGranted = true
+    @discardableResult
+    func requestPermissionAndStart() async -> Bool {
+        refreshPermissionStatus()
+        if authorizationStatus == .authorized {
             start()
-            return
+            return hasFrontCamera
         }
-        if status == .notDetermined {
+        if authorizationStatus == .notDetermined {
             let granted = await AVCaptureDevice.requestAccess(for: .video)
-            cameraPermissionGranted = granted
+            refreshPermissionStatus()
             if granted {
                 start()
             } else {
-                cameraUnavailableReason = "Permiso de cámara denegado"
+                cameraUnavailableReason = "Activa el permiso de Cámara en Ajustes de iOS"
             }
-            return
+            return granted
         }
-        cameraPermissionGranted = false
         cameraUnavailableReason = "Activa el permiso de Cámara en Ajustes de iOS"
+        return false
+    }
+
+    @discardableResult
+    func requestPermissionOrOpenSettings() async -> Bool {
+        refreshPermissionStatus()
+        switch authorizationStatus {
+        case .authorized:
+            start()
+            return hasFrontCamera
+        case .notDetermined:
+            return await requestPermissionAndStart()
+        case .denied, .restricted:
+            openSystemAppSettings()
+            return false
+        @unknown default:
+            openSystemAppSettings()
+            return false
+        }
     }
 
     func start() {
-        #if targetEnvironment(simulator)
-        isRunning = true
-        cameraUnavailableReason = "Simulador iOS: usa los botones de prueba de gestos"
-        return
-        #else
-        let auth = AVCaptureDevice.authorizationStatus(for: .video)
-        guard auth == .authorized else {
-            cameraPermissionGranted = false
+        refreshPermissionStatus()
+        guard authorizationStatus == .authorized else {
+            isRunning = false
             cameraUnavailableReason = "Permiso de cámara requerido"
             return
         }
-        cameraPermissionGranted = true
+        guard hasFrontCamera else {
+            isRunning = false
+            cameraUnavailableReason = "Este equipo no dispone de cámara frontal física"
+            return
+        }
         cameraUnavailableReason = nil
         isRunning = true
 
@@ -95,21 +126,16 @@ final class CameraHandDetector: NSObject, ObservableObject {
                 self.session.startRunning()
             }
         }
-        #endif
     }
 
     func stop() {
-        simAutoResetTask?.cancel()
-        simAutoResetTask = nil
         isRunning = false
-        #if !targetEnvironment(simulator)
         sessionQueue.async { [weak self] in
             guard let self else { return }
             if self.session.isRunning {
                 self.session.stopRunning()
             }
         }
-        #endif
         resetGrabStateMachine(preserveSustainedFistGuard: false)
         handVisible = false
     }
@@ -123,53 +149,6 @@ final class CameraHandDetector: NSObject, ObservableObject {
         if let next = stateMachine.rearmIfStillCompleted(grabSequenceId: seqId) {
             gestureState = next
         }
-    }
-
-    // MARK: - Simulator / Manual Test Hooks
-
-    func simulateOpenPalm() {
-        simAutoResetTask?.cancel()
-        handVisible = true
-        let now = Self.uptimeMs()
-        _ = processGeometry(isOpenPalm: true, isFist: false, isOkSign: false, nowMs: now)
-        _ = processGeometry(isOpenPalm: true, isFist: false, isOkSign: false, nowMs: now + 70)
-    }
-
-    func simulateFistGrab() {
-        simAutoResetTask?.cancel()
-        handVisible = true
-        let now = Self.uptimeMs()
-        if stateMachine.currentStep() == .waitingForOpenPalm {
-            _ = processGeometry(isOpenPalm: true, isFist: false, isOkSign: false, nowMs: now)
-            _ = processGeometry(isOpenPalm: true, isFist: false, isOkSign: false, nowMs: now + 70)
-        }
-        _ = processGeometry(isOpenPalm: false, isFist: true, isOkSign: false, nowMs: now + 130)
-        _ = processGeometry(isOpenPalm: false, isFist: true, isOkSign: false, nowMs: now + 180)
-    }
-
-    func simulateCatchRelease() {
-        simAutoResetTask?.cancel()
-        handVisible = true
-        let now = Self.uptimeMs()
-        _ = processGeometry(isOpenPalm: true, isFist: false, isOkSign: false, nowMs: now)
-        _ = processGeometry(isOpenPalm: true, isFist: false, isOkSign: false, nowMs: now + 60)
-    }
-
-    func simulateOkSign() {
-        simAutoResetTask?.cancel()
-        handVisible = true
-        let now = Self.uptimeMs()
-        _ = processGeometry(isOpenPalm: false, isFist: false, isOkSign: true, nowMs: now)
-        _ = processGeometry(isOpenPalm: false, isFist: false, isOkSign: true, nowMs: now + 60)
-    }
-
-    func simulateTrackingLost() {
-        simAutoResetTask?.cancel()
-        handVisible = false
-        let now = Self.uptimeMs()
-        _ = stateMachine.onTrackingLost(strictIntentMode: strictIntentMode, nowMs: now)
-        _ = stateMachine.onTrackingLost(strictIntentMode: strictIntentMode, nowMs: now + 40)
-        gestureState = stateMachine.onTrackingLost(strictIntentMode: strictIntentMode, nowMs: now + 80)
     }
 
     // MARK: - Private Camera Setup

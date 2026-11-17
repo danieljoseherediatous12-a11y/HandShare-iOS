@@ -466,6 +466,10 @@ final class GrabSessionCoordinator: ObservableObject {
             self.stagedIncoming.append(item)
             self.transferState = .completed(fileName: item.metadata.fileName, isSender: false)
             self.enterWaitingToCatchMode()
+            if self.detector.handVisible &&
+                (self.detector.gestureState == .handOpen || self.detector.gestureState == .released) {
+                self.commitCatchNow()
+            }
         }
     }
 

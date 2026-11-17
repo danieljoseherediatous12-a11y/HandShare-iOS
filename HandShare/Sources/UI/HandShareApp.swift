@@ -28,6 +28,7 @@ struct RootContainerView: View {
     @ObservedObject var coordinator: GrabSessionCoordinator
     @ObservedObject var prefs: AppPreferences
     @ObservedObject private var photos = PhotoLibraryService.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var activeTab: HSTab = .home
     @State private var viewerAssetBox: ViewerAssetBox?
@@ -203,6 +204,13 @@ struct RootContainerView: View {
         }
         .onAppear {
             coordinator.startNetworking()
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                photos.refreshAuthorization()
+                coordinator.detector.refreshPermissionStatus()
+                coordinator.lan.refreshDiscovery()
+            }
         }
     }
 

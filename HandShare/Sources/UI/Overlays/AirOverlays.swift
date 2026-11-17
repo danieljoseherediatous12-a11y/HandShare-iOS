@@ -213,6 +213,9 @@ struct AirAuroraBubbleView: View {
                 )
                 .padding(.trailing, 8)
                 .padding(.bottom, 95)
+                .accessibilityLabel(isRadarActive ? "Detectar gestos activo" : "Activar cámara de gestos")
+                .accessibilityHint("Toca para activar o pausar el reconocimiento de palma y puño")
+                .accessibilityIdentifier("air_aurora_bubble")
             }
         }
         .onAppear {
@@ -452,36 +455,77 @@ struct CatchLandingOverlayView: View {
     }
 }
 
-struct SimulatorGestureHudView: View {
-    @ObservedObject var coordinator: GrabSessionCoordinator
+struct LiveGestureRadarStatusPillView: View {
+    @ObservedObject var detector: CameraHandDetector
+    let isHoldingCard: Bool
 
     var body: some View {
-        VStack(spacing: 6) {
-            Text("SIMULADOR · TEST DE GESTOS")
-                .font(.system(size: 9.5, weight: .bold))
-                .foregroundColor(.white.opacity(0.8))
-            HStack(spacing: 8) {
-                Button("✋ Palma") {
-                    coordinator.detector.simulateOpenPalm()
+        HStack(spacing: 10) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 9, height: 9)
+
+            Text(statusText)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundColor(.white)
+                .lineLimit(2)
+
+            if !detector.cameraPermissionGranted {
+                Button(detector.isDeniedOrRestricted ? "Abrir Ajustes" : "Permitir") {
+                    Task { _ = await detector.requestPermissionOrOpenSettings() }
                 }
-                Button("✊ Puño") {
-                    coordinator.detector.simulateFistGrab()
-                }
-                Button("👌 OK") {
-                    coordinator.detector.simulateOkSign()
-                }
-                if coordinator.status == .waitingToCatch {
-                    Button("✋ Atrapar") {
-                        coordinator.commitCatchNow()
-                    }
-                }
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(HSColor.blue, in: Capsule())
+                .buttonStyle(.plain)
             }
-            .font(.system(size: 11.5, weight: .semibold))
-            .buttonStyle(.borderedProminent)
-            .tint(HSColor.blue)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(Color.black.opacity(0.76), in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+        .padding(.horizontal, 18)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("live_gesture_status_pill")
+    }
+
+    private var statusColor: Color {
+        if !detector.cameraPermissionGranted || !detector.hasFrontCamera {
+            return HSColor.orange
+        }
+        switch detector.gestureState {
+        case .handOpen:
+            return Color.cyan
+        case .grabbed:
+            return HSColor.green
+        default:
+            return detector.isRunning ? HSColor.blue : HSColor.orange
+        }
+    }
+
+    private var statusText: String {
+        if !detector.cameraPermissionGranted {
+            return detector.isDeniedOrRestricted
+                ? "Cámara desactivada · Actívala en Ajustes"
+                : "Permiso de cámara requerido para gestos"
+        }
+        if !detector.hasFrontCamera {
+            return detector.cameraUnavailableReason ?? "Sin cámara frontal disponible"
+        }
+        if isHoldingCard {
+            return "Foto en la mano ✊ · Cierra o cambia de foto"
+        }
+        switch detector.gestureState {
+        case .handOpen:
+            return "Palma detectada ✋ · Cierra el puño ✊ para agarrar"
+        case .detecting:
+            return "Detectando palma abierta…"
+        case .grabbed:
+            return "Foto agarrada ✊"
+        default:
+            return "Muestra tu palma abierta ✋ frente a la cámara"
+        }
     }
 }

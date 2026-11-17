@@ -13,7 +13,6 @@ final class AppPreferences: ObservableObject {
         static let gestureSensitivity = "hs_gesture_sensitivity"
         static let edgeGlowEnabled = "hs_edge_glow_enabled"
         static let autoOpenReceivedMedia = "hs_auto_open_received"
-        static let showSimulatorDevControls = "hs_sim_dev_controls"
         static let sentCount = "hs_sent_count"
         static let receivedCount = "hs_received_count"
     }
@@ -37,10 +36,6 @@ final class AppPreferences: ObservableObject {
 
     @Published var autoOpenReceivedMedia: Bool {
         didSet { defaults.set(autoOpenReceivedMedia, forKey: Keys.autoOpenReceivedMedia) }
-    }
-
-    @Published var showSimulatorDevControls: Bool {
-        didSet { defaults.set(showSimulatorDevControls, forKey: Keys.showSimulatorDevControls) }
     }
 
     @Published var sentCount: Int {
@@ -78,16 +73,6 @@ final class AppPreferences: ObservableObject {
             self.autoOpenReceivedMedia = defaults.bool(forKey: Keys.autoOpenReceivedMedia)
         } else {
             self.autoOpenReceivedMedia = true
-        }
-
-        if defaults.object(forKey: Keys.showSimulatorDevControls) != nil {
-            self.showSimulatorDevControls = defaults.bool(forKey: Keys.showSimulatorDevControls)
-        } else {
-            #if targetEnvironment(simulator)
-            self.showSimulatorDevControls = true
-            #else
-            self.showSimulatorDevControls = false
-            #endif
         }
 
         self.sentCount = defaults.integer(forKey: Keys.sentCount)

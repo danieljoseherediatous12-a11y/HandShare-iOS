@@ -9,6 +9,8 @@ struct OnboardingView: View {
     var onFinished: (() -> Void)? = nil
 
     @State private var page = 0
+    @State private var showDeniedSettingsAlert = false
+    @State private var deniedAlertMessage = ""
 
     init(coordinator: GrabSessionCoordinator, onFinished: (() -> Void)? = nil) {
         self.coordinator = coordinator
@@ -16,8 +18,16 @@ struct OnboardingView: View {
         _detector = ObservedObject(wrappedValue: coordinator.detector)
     }
 
+    private var cameraReadyOrNotApplicable: Bool {
+        detector.cameraPermissionGranted || !detector.hasFrontCamera
+    }
+
     private var readyCount: Int {
-        [photos.isAuthorized, detector.cameraPermissionGranted, lan.isWifiAvailable].filter { $0 }.count
+        [photos.isAuthorized, cameraReadyOrNotApplicable, lan.isWifiAvailable].filter { $0 }.count
+    }
+
+    private var allReady: Bool {
+        photos.isAuthorized && cameraReadyOrNotApplicable && lan.isWifiAvailable
     }
 
     var body: some View {
@@ -56,7 +66,7 @@ struct OnboardingView: View {
                     .buttonStyle(.plain)
                 }
 
-                let canFinish = page < 2 || photos.isAuthorized
+                let canFinish = page < 2 || allReady
                 Button {
                     if page < 2 {
                         withAnimation { page += 1 }
@@ -64,9 +74,7 @@ struct OnboardingView: View {
                         finish()
                     } else {
                         Task {
-                            _ = await photos.requestAuthorization()
-                            await detector.requestPermissionAndStart()
-                            coordinator.startNetworking()
+                            await requestRemainingPermissions()
                         }
                     }
                 } label: {
@@ -84,21 +92,31 @@ struct OnboardingView: View {
                         .shadow(color: (canFinish ? HSColor.blue : HSColor.secondary).opacity(0.32), radius: 12, x: 0, y: 6)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("onboarding_primary_btn")
             }
             .padding(.horizontal, 24)
             .padding(.top, 10)
 
-            if page == 2 && readyCount < 3 {
+            if page == 2 && !allReady {
                 Button("Continuar a HandShare") {
                     finish()
                 }
                 .font(.system(size: 13.5, weight: .medium))
                 .foregroundColor(HSColor.secondary)
                 .padding(.top, 8)
+                .accessibilityIdentifier("onboarding_continue_btn")
             }
         }
         .padding(.bottom, 22)
         .background(HSColor.background.ignoresSafeArea())
+        .alert("Permisos en Ajustes de iOS", isPresented: $showDeniedSettingsAlert) {
+            Button("Abrir Ajustes") {
+                openSystemAppSettings()
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text(deniedAlertMessage)
+        }
     }
 
     private var buttonTitle: String {
@@ -106,7 +124,31 @@ struct OnboardingView: View {
         case 0: return "Descubrir cómo funciona"
         case 1: return "Configurar mi dispositivo"
         default:
-            return readyCount == 3 ? "Comenzar a usar HandShare" : "Activar permisos (\(readyCount)/3)"
+            return allReady ? "Comenzar a usar HandShare" : "Activar permisos (\(readyCount)/3)"
+        }
+    }
+
+    private func requestRemainingPermissions() async {
+        if photos.authorizationStatus == .notDetermined {
+            _ = await photos.requestAuthorization()
+        }
+        if detector.hasFrontCamera && detector.authorizationStatus == .notDetermined {
+            _ = await detector.requestPermissionAndStart()
+        }
+        coordinator.startNetworking()
+
+        photos.refreshAuthorization()
+        detector.refreshPermissionStatus()
+        lan.refreshDiscovery()
+
+        var deniedNames: [String] = []
+        if photos.isDeniedOrRestricted { deniedNames.append("Fototeca") }
+        if detector.hasFrontCamera && detector.isDeniedOrRestricted { deniedNames.append("Cámara") }
+        if !lan.isWifiAvailable { deniedNames.append("Wi‑Fi / Red local") }
+
+        if !deniedNames.isEmpty {
+            deniedAlertMessage = "Activa \(deniedNames.joined(separator: ", ")) en Ajustes de iOS para usar HandShare al 100%."
+            showDeniedSettingsAlert = true
         }
     }
 
@@ -120,13 +162,14 @@ struct OnboardingView: View {
         ScrollView {
             VStack(spacing: 14) {
                 Text("Activa tu dispositivo")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: 27, weight: .bold))
                     .foregroundColor(HSColor.label)
-                    .padding(.top, 16)
+                    .padding(.top, 10)
                 Text("Solo unos toques para conectar iPhone con tu Android y PC Windows.")
-                    .font(.system(size: 15))
+                    .font(.system(size: 14.5))
                     .foregroundColor(HSColor.secondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 24)
 
                 IosGroupCard {
@@ -134,35 +177,56 @@ struct OnboardingView: View {
                         icon: "photo.on.rectangle.angled",
                         tint: HSColor.blue,
                         title: "Fototeca (Fotos y Videos)",
-                        subtitle: photos.isAuthorized ? "Acceso listo" : "Toca para mostrar tu galería",
+                        subtitle: photos.isAuthorized
+                            ? "Acceso listo"
+                            : (photos.isDeniedOrRestricted ? "Denegado · Toca para abrir Ajustes" : "Toca para mostrar tu galería"),
+                        actionTitle: photos.isDeniedOrRestricted ? "Ajustes" : "Activar",
                         granted: photos.isAuthorized
                     ) {
-                        Task { _ = await photos.requestAuthorization() }
+                        Task { _ = await photos.requestAuthorizationOrOpenSettings() }
                     }
                     RowDividerLine()
                     activationRow(
                         icon: "camera.fill",
                         tint: HSColor.green,
                         title: "Cámara Frontal IA",
-                        subtitle: detector.cameraPermissionGranted ? "Reconocimiento listo" : "Para leer palma ✋ y puño ✊",
+                        subtitle: cameraSubtitle,
+                        actionTitle: detector.isDeniedOrRestricted ? "Ajustes" : "Activar",
                         granted: detector.cameraPermissionGranted
                     ) {
-                        Task { await detector.requestPermissionAndStart() }
+                        Task { _ = await detector.requestPermissionOrOpenSettings() }
                     }
                     RowDividerLine()
                     activationRow(
                         icon: "wifi",
                         tint: HSColor.indigo,
                         title: "Red Local Wi‑Fi",
-                        subtitle: lan.isWifiAvailable ? "Puertos 47831 / 47832 activos" : "Conéctate al mismo Wi‑Fi",
+                        subtitle: lan.isWifiAvailable
+                            ? "Puertos \(LanProtocol.udpDiscoveryPort) / \(lan.activeTcpPort) activos"
+                            : "Conéctate al Wi‑Fi o revisa Red local en Ajustes",
+                        actionTitle: "Ajustes",
                         granted: lan.isWifiAvailable
                     ) {
                         coordinator.startNetworking()
+                        lan.refreshDiscovery()
+                        if !lan.isWifiAvailable {
+                            openSystemAppSettings()
+                        }
                     }
                 }
-                .padding(.top, 8)
+                .padding(.top, 4)
             }
         }
+    }
+
+    private var cameraSubtitle: String {
+        if detector.cameraPermissionGranted {
+            return detector.hasFrontCamera ? "Reconocimiento listo" : "Permiso OK (sin cámara física en simulador)"
+        }
+        if !detector.hasFrontCamera {
+            return "No disponible en simulador (funcionará en iPhone)"
+        }
+        return detector.isDeniedOrRestricted ? "Denegado · Toca para abrir Ajustes" : "Para leer palma ✋ y puño ✊"
     }
 
     private func activationRow(
@@ -170,6 +234,7 @@ struct OnboardingView: View {
         tint: Color,
         title: String,
         subtitle: String,
+        actionTitle: String,
         granted: Bool,
         action: @escaping () -> Void
     ) -> some View {
@@ -197,7 +262,7 @@ struct OnboardingView: View {
                         .font(.system(size: 22))
                         .foregroundColor(HSColor.green)
                 } else {
-                    Text("Activar")
+                    Text(actionTitle)
                         .font(.system(size: 12.5, weight: .bold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)

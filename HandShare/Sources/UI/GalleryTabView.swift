@@ -129,11 +129,12 @@ struct GalleryTabView: View {
                             .foregroundColor(HSColor.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 36)
-                        Button("Permitir Fototeca") {
-                            Task { _ = await photos.requestAuthorization() }
+                        Button(photos.isDeniedOrRestricted ? "Abrir Ajustes" : "Permitir Fototeca") {
+                            Task { _ = await photos.requestAuthorizationOrOpenSettings() }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(HSColor.blue)
+                        .accessibilityIdentifier("gallery_allow_photos_btn")
                     }
                     .padding(.bottom, 100)
                     Spacer()
@@ -151,7 +152,7 @@ struct GalleryTabView: View {
                         Text(emptyLabel)
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(HSColor.secondary)
-                        CircleIconButton(icon: "arrow.clockwise", tint: HSColor.blue) {
+                        CircleIconButton(icon: "arrow.clockwise", tint: HSColor.blue, accessibilityTitle: "Recargar galería") {
                             photos.reloadAssets()
                         }
                     }
@@ -278,7 +279,7 @@ struct FullscreenMediaViewerView: View {
 
     @State private var currentId: String
     @State private var showChrome = true
-    @ObservedObject private var prefs = AppPreferences.shared
+    @ObservedObject private var detector: CameraHandDetector
 
     init(
         coordinator: GrabSessionCoordinator,
@@ -287,6 +288,7 @@ struct FullscreenMediaViewerView: View {
         onClose: @escaping () -> Void
     ) {
         self.coordinator = coordinator
+        _detector = ObservedObject(wrappedValue: coordinator.detector)
         self.assets = assets.isEmpty ? [initialAsset] : assets
         self.initialAsset = initialAsset
         self.onClose = onClose
@@ -333,12 +335,12 @@ struct FullscreenMediaViewerView: View {
                                 .frame(width: 40, height: 40)
                                 .background(Color.black.opacity(0.55), in: Circle())
                         }
+                        .accessibilityLabel("Volver")
+                        .accessibilityIdentifier("viewer_back_btn")
                         Spacer()
 
                         Button {
-                            if let asset = currentAsset {
-                                coordinator.grabAsset(asset, fromViewer: true)
-                            }
+                            coordinator.grabAsset(currentAsset ?? initialAsset, fromViewer: true)
                         } label: {
                             Label("Agarrar", systemImage: "hand.raised.fill")
                                 .font(.system(size: 13.5, weight: .semibold))
@@ -347,6 +349,7 @@ struct FullscreenMediaViewerView: View {
                                 .padding(.vertical, 8)
                                 .background(HSColor.blue.opacity(0.9), in: Capsule())
                         }
+                        .accessibilityIdentifier("viewer_grab_btn")
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
@@ -362,11 +365,14 @@ struct FullscreenMediaViewerView: View {
                 coordinator.toggleRadar(for: currentAsset)
             }
 
-            if coordinator.isRadarActive && prefs.showSimulatorDevControls {
+            if coordinator.isRadarActive {
                 VStack {
                     Spacer()
-                    SimulatorGestureHudView(coordinator: coordinator)
-                        .padding(.bottom, 22)
+                    LiveGestureRadarStatusPillView(
+                        detector: detector,
+                        isHoldingCard: coordinator.isHoldingCard
+                    )
+                    .padding(.bottom, 22)
                 }
             }
         }

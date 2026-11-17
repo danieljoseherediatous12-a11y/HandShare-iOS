@@ -10,7 +10,7 @@ final class LanTransportService: ObservableObject {
     @Published private(set) var peers: [HandSharePeer] = []
     @Published private(set) var connectedEndpointId: String?
     @Published private(set) var localIPAddress: String?
-    @Published private(set) var isWifiAvailable: Bool = true
+    @Published private(set) var isWifiAvailable: Bool = false
     @Published private(set) var activeTcpPort: Int = LanProtocol.tcpPort
     @Published private(set) var lastNetworkError: String?
 
@@ -557,10 +557,12 @@ final class LanTransportService: ObservableObject {
     private func startPathMonitor() {
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
-            let hasWifi = path.status == .satisfied && !path.usesInterfaceType(.cellular)
+            let isWifiOrEth = path.status == .satisfied &&
+                (path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet) || !path.usesInterfaceType(.cellular))
             Task { @MainActor [weak self] in
-                self?.isWifiAvailable = hasWifi || path.status == .satisfied
-                self?.updateLocalIPAddress()
+                guard let self else { return }
+                self.updateLocalIPAddress()
+                self.isWifiAvailable = isWifiOrEth || (path.status == .satisfied && self.localIPAddress != nil)
             }
         }
         monitor.start(queue: ioQueue)
@@ -982,7 +984,11 @@ final class LanTransportService: ObservableObject {
     }
 
     private func updateLocalIPAddress() {
-        localIPAddress = Self.firstLocalIPv4()
+        let ip = Self.firstLocalIPv4()
+        localIPAddress = ip
+        if ip != nil {
+            isWifiAvailable = true
+        }
     }
 
     private nonisolated func broadcastAddresses() -> [String] {

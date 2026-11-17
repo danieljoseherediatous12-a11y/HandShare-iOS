@@ -1,6 +1,18 @@
 import AVFoundation
 import Photos
 import SwiftUI
+import UIKit
+
+@MainActor
+func openSystemAppSettings() {
+    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+    UIApplication.shared.open(url)
+}
+
+@MainActor
+func hideKeyboard() {
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+}
 
 enum HSColor {
     static let background = Color(red: 0.949, green: 0.949, blue: 0.969) // #F2F2F7
@@ -141,6 +153,7 @@ struct LargeTitleBar<Trailing: View>: View {
 struct CircleIconButton: View {
     let icon: String
     var tint: Color = HSColor.label
+    var accessibilityTitle: String = "Botón"
     let action: () -> Void
 
     var body: some View {
@@ -152,6 +165,7 @@ struct CircleIconButton: View {
                 .background(HSColor.card, in: Circle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityTitle)
     }
 }
 
@@ -292,6 +306,7 @@ struct FloatingGlassTabBar: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(tab.title)
+                            .accessibilityIdentifier("tab_\(tab.rawValue)")
                         }
                     }
                 }

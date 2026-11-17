@@ -29,6 +29,10 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         authorizationStatus == .authorized || authorizationStatus == .limited
     }
 
+    var isDeniedOrRestricted: Bool {
+        authorizationStatus == .denied || authorizationStatus == .restricted
+    }
+
     private override init() {
         self.authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         super.init()
@@ -60,6 +64,23 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             reloadAssets()
         }
         return isAuthorized
+    }
+
+    @discardableResult
+    func requestAuthorizationOrOpenSettings() async -> Bool {
+        refreshAuthorization()
+        switch authorizationStatus {
+        case .authorized, .limited:
+            return true
+        case .notDetermined:
+            return await requestAuthorization()
+        case .denied, .restricted:
+            openSystemAppSettings()
+            return false
+        @unknown default:
+            openSystemAppSettings()
+            return false
+        }
     }
 
     func reloadAssets() {
