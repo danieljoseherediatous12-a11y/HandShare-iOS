@@ -135,6 +135,12 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 if let err = info?[PHImageErrorKey], err as? NSError != nil {
                     resumed = true
                     cont.resume(returning: nil)
+                    return
+                }
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if !isDegraded {
+                    resumed = true
+                    cont.resume(returning: nil)
                 }
             }
         }
@@ -146,7 +152,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             let opts = PHVideoRequestOptions()
             opts.deliveryMode = .automatic
             opts.isNetworkAccessAllowed = true
-            imageManager.requestAVAsset(for: asset, options: opts) { avAsset, _, _ in
+            imageManager.requestAVAsset(forVideo: asset, options: opts) { avAsset, _, _ in
                 cont.resume(returning: avAsset)
             }
         }
