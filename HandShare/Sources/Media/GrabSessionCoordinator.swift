@@ -175,11 +175,7 @@ final class GrabSessionCoordinator: ObservableObject {
         HapticEngine.shared.grabSuccess()
 
         Task {
-            let preview = await photos.requestFullImage(for: asset)
-                ?? (await requestThumbnailAsync(for: asset))
-            if let preview {
-                floatingPreviewImage = preview
-            }
+            await loadFloatingPreview(for: asset)
         }
 
         queueAndSendAsset(asset)
@@ -199,12 +195,18 @@ final class GrabSessionCoordinator: ObservableObject {
         streamCompletedDelivery = false
         HapticEngine.shared.grabSuccess()
         Task {
-            if let preview = await photos.requestFullImage(for: last) {
-                floatingPreviewImage = preview
-            }
+            await loadFloatingPreview(for: last)
         }
         for asset in assets {
             queueAndSendAsset(asset)
+        }
+    }
+
+    private func loadFloatingPreview(for asset: PHAsset) async {
+        if let full = await photos.requestFullImage(for: asset) {
+            floatingPreviewImage = full
+        } else if let thumb = await requestThumbnailAsync(for: asset) {
+            floatingPreviewImage = thumb
         }
     }
 
