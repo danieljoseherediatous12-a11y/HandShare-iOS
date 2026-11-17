@@ -71,9 +71,12 @@ struct OnboardingView: View {
                     }
                 } label: {
                     Text(buttonTitle)
-                        .font(.system(size: 16.5, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(canFinish ? .white : HSColor.label)
-                        .frame(maxWidth: .infinity, minHeight: 56)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: .infinity, minHeight: 54)
                         .background(
                             canFinish ? HSColor.blue : HSColor.fill,
                             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -215,50 +218,53 @@ private struct WelcomeHeroStepView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: 12) {
                 ZStack {
                     Circle()
                         .fill(
                             RadialGradient(
                                 colors: [HSColor.cyan.opacity(0.25), .clear],
                                 center: .center,
-                                startRadius: 10,
-                                endRadius: 95
+                                startRadius: 8,
+                                endRadius: 72
                             )
                         )
-                        .frame(width: 190, height: 190)
+                        .frame(width: 144, height: 144)
 
                     Circle()
                         .stroke(HSColor.blue.opacity(0.16), lineWidth: 1.5)
-                        .frame(width: 168, height: 168)
+                        .frame(width: 128, height: 128)
 
                     ForEach(0..<3, id: \.self) { i in
                         let a = orbit + Double(i) * (2.0 * .pi / 3.0)
                         Circle()
                             .fill(HSColor.cyan)
-                            .frame(width: 10, height: 10)
-                            .offset(x: cos(a) * 84, y: sin(a) * 84)
+                            .frame(width: 9, height: 9)
+                            .offset(x: cos(a) * 64, y: sin(a) * 64)
                     }
 
-                    HandShareHeaderLogo(size: 98)
-                        .shadow(color: HSColor.blue.opacity(0.45), radius: 18, x: 0, y: 10)
+                    HandShareHeaderLogo(size: 76)
+                        .shadow(color: HSColor.blue.opacity(0.45), radius: 14, x: 0, y: 8)
                         .offset(y: floatY)
                 }
-                .padding(.top, 12)
+                .padding(.top, 4)
 
                 Text("Bienvenido a HandShare")
-                    .font(.system(size: 30, weight: .bold))
+                    .font(.system(size: 27, weight: .bold))
                     .foregroundColor(HSColor.label)
-                    .tracking(-0.6)
+                    .tracking(-0.5)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
 
                 Text("Comparte fotos y videos de un celular a otro en el aire usando únicamente el gesto de tu mano.")
-                    .font(.system(size: 15.5))
+                    .font(.system(size: 14.5))
                     .foregroundColor(HSColor.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 28)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 24)
 
-                VStack(spacing: 16) {
+                VStack(spacing: 13) {
                     featureRow("hand.raised.fill", HSColor.blue,
                                "Galería Air integrada",
                                "Abre cualquier foto o video en iPhone y usa el mismo flujo flotante que Android.")
@@ -269,9 +275,9 @@ private struct WelcomeHeroStepView: View {
                                "Velocidad P2P Wi‑Fi",
                                "Conecta iPhone, Android y Windows PC en tu misma red sin usar Internet.")
                 }
-                .padding(18)
+                .padding(16)
                 .background(HSColor.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 20)
             }
             .padding(.bottom, 12)
         }
@@ -315,34 +321,31 @@ private struct InteractiveGestureDemoStepView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: 14) {
                 Text("Cómo se utiliza")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: 27, weight: .bold))
                     .foregroundColor(HSColor.label)
-                    .padding(.top, 12)
+                    .padding(.top, 8)
                 Text("Tres gestos naturales en el aire, sin tocar la pantalla")
-                    .font(.system(size: 15))
+                    .font(.system(size: 14.5))
                     .foregroundColor(HSColor.secondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 24)
 
                 // Clean Studio Stage matching Android WelcomeOnboardingDialog
                 GeometryReader { geo in
                     let w = geo.size.width
                     let h = geo.size.height
-                    let pW = w * 0.25
-                    let pH = h * 0.78
-                    let lX = w * 0.10
-                    let rX = w * 0.65
-                    let pY = (h - pH) / 2 - 8
+                    let pW = w * 0.23
+                    let pH = h * 0.74
+                    let lX = w * 0.13
+                    let rX = w * 0.64
+                    let pY = (h - pH) / 2
 
                     ZStack {
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
                             .fill(HSColor.card)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                    .stroke(HSColor.separator, lineWidth: 1.2)
-                            )
 
                         // Phone A & Phone B
                         demoPhone(glowing: stage == 0 || stage == 1, width: pW, height: pH)
@@ -372,29 +375,35 @@ private struct InteractiveGestureDemoStepView: View {
                         Image(stage == 1 ? "HandFist" : "HandOpen")
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 84, height: 84)
+                            .frame(width: 78, height: 78)
                             .position(
                                 x: stage == 0 ? (lX + pW / 2) : (stage == 1 ? w / 2 : (rX + pW / 2)),
-                                y: pY + pH / 2 - 20 + (stage == 1 ? handBob : 0)
+                                y: pY + pH / 2 - 18 + (stage == 1 ? handBob : 0)
                             )
                     }
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(HSColor.separator, lineWidth: 1.2)
+                    )
                     .animation(.spring(response: 0.55, dampingFraction: 0.78), value: stage)
                 }
-                .frame(height: 245)
-                .padding(.horizontal, 24)
+                .frame(height: 215)
+                .padding(.horizontal, 20)
 
                 HStack(spacing: 8) {
                     stageChip(0, "1. Palma ✋")
                     stageChip(1, "2. Puño ✊")
                     stageChip(2, "3. Soltar ✋")
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 20)
 
                 Text(stageDescription)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(HSColor.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 28)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 24)
             }
         }
         .onReceive(timer) { _ in
