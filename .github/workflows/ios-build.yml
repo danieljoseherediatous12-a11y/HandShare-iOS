@@ -1167,7 +1167,17 @@ jobs:
             fi
 
             echo "Running: $BUILD_CMD"
-            eval $BUILD_CMD
+            if ! eval $BUILD_CMD > /tmp/xcodebuild.log 2>&1; then
+              cat /tmp/xcodebuild.log
+              ERRS=$(grep -E "error:|fatal error:|BUILD FAILED|xcodebuild:" /tmp/xcodebuild.log | head -n 20 || true)
+              if [ -z "$ERRS" ]; then
+                ERRS=$(tail -n 15 /tmp/xcodebuild.log)
+              fi
+              printf '%s\n' "$ERRS" | while IFS= read -r line; do
+                [ -n "$line" ] && echo "::error::$line"
+              done
+              exit 65
+            fi
           else
             BUILD_CMD="xcodebuild"
             if [ -n "$WORKSPACE" ]; then
@@ -1205,7 +1215,17 @@ jobs:
             fi
 
             echo "Running: $BUILD_CMD"
-            eval $BUILD_CMD
+            if ! eval $BUILD_CMD > /tmp/xcodebuild.log 2>&1; then
+              cat /tmp/xcodebuild.log
+              ERRS=$(grep -E "error:|fatal error:|BUILD FAILED|xcodebuild:" /tmp/xcodebuild.log | head -n 20 || true)
+              if [ -z "$ERRS" ]; then
+                ERRS=$(tail -n 15 /tmp/xcodebuild.log)
+              fi
+              printf '%s\n' "$ERRS" | while IFS= read -r line; do
+                [ -n "$line" ] && echo "::error::$line"
+              done
+              exit 65
+            fi
           fi
 
           # Create IPA
